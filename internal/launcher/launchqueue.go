@@ -3,15 +3,23 @@ package launcher
 import (
 	"accountchanger/internal/config"
 	"accountchanger/internal/platform"
+	"accountchanger/internal/player"
 	"accountchanger/internal/vault"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
 
 const launchingWindow = 2 * time.Minute
 const tokenConsumeDelay = 6 * time.Second
+const stagingClient = "Minigames-staging-java21"
+
+func launchIsStaff(name string) bool {
+	staff := player.CachedStaff(name)
+	return staff != "" && !strings.EqualFold(staff, "PLAYER")
+}
 
 type LaunchQueue struct {
 	paths       platform.Paths
@@ -102,32 +110,101 @@ func AccountLaunchOpts(acc *vault.Account) vault.LaunchOpts {
 	}
 }
 
-func (q *LaunchQueue) launchExe(uuid, name, exe, url string) bool {
-	if EnsureLauncherFrom(exe, url) != nil {
-		return false
+func (q *LaunchQueue) launchExe(uuid, name, client, exe, url string, before []uint32) (bool, <-chan bool) {
+	if err := EnsureLauncherFrom(exe, url); err != nil {
+		if q.logs != nil {
+			q.logs.unsupported(uuid, name, "[AccountChanger] Не удалось подготовить лаунчер: "+err.Error())
+		}
+		return false, nil
 	}
-	if q.logs != nil {
-		q.logs.unsupported(uuid, name, "Этот лаунчер не поддерживает чтение логов")
+	var launcherPID uint32
+	err := StartLauncherLogged(exe, uuid, name, nil, func(p *os.Process) {
+		q.track(uuid, p)
+		if p != nil {
+			launcherPID = uint32(p.Pid)
+		}
+	}, nil)
+	if err != nil {
+		if q.logs != nil {
+			q.logs.unsupported(uuid, name, "[AccountChanger] Не удалось запустить лаунчер: "+err.Error())
+		}
+		return false, nil
 	}
-	return StartLauncher(exe) == nil
+	ready := make(chan bool, 1)
+	go TailGameLog(q.paths.Updates, client, uuid, name, q.logs, func(ok bool) {
+		if ok {
+			go func() {
+				pid := q.tracker.bindVerifiedLauncher(uuid, launcherPID)
+				if pid == 0 {
+					pid = q.tracker.bindGame(uuid, before)
+				}
+				if pid != 0 {
+					q.finishLogWhenGameCloses(uuid)
+				} else if q.logs != nil {
+					q.logs.finish(uuid)
+				}
+			}()
+		}
+		ready <- ok
+	})
+	return true, ready
 }
 
-func (q *LaunchQueue) launchFor(uuid, name string) bool {
+func (q *LaunchQueue) finishLogWhenGameCloses(uuid string) {
+	seen := false
+	misses := 0
+	for {
+		running, _ := q.tracker.Resolve()
+		if running[uuid] != 0 {
+			seen = true
+			misses = 0
+		} else if seen {
+			misses++
+			if misses >= 2 {
+				q.logs.finish(uuid)
+				return
+			}
+		}
+		time.Sleep(1 * time.Second)
+	}
+}
+
+func (q *LaunchQueue) launchFor(uuid, name, client string, before []uint32) (bool, bool, <-chan bool) {
 	switch q.cfg.Launcher() {
+	case config.LauncherCustom:
+		if q.logs != nil {
+			q.logs.unsupported(uuid, name, "Этот лаунчер не поддерживает чтение логов")
+		}
+		return StartLauncher(q.cfg.CustomLauncher()) == nil, false, nil
 	case config.LauncherNormal:
-		return q.launchExe(uuid, name, q.paths.LauncherExe, launcherDownloadURL)
+		ok, ready := q.launchExe(uuid, name, client, q.paths.LauncherExe, launcherDownloadURL, before)
+		return ok, true, ready
 	case config.LauncherNew:
-		return q.launchExe(uuid, name, q.paths.StaffLauncherExe, StaffLauncherURL)
+		ok, ready := q.launchExe(uuid, name, client, q.paths.StaffLauncherExe, StaffLauncherURL, before)
+		return ok, true, ready
 	default:
 		if EnsureLauncherFrom(q.paths.LauncherJar, JarLauncherURL) != nil {
-			return q.launchExe(uuid, name, q.paths.StaffLauncherExe, StaffLauncherURL)
+			ok, ready := q.launchExe(uuid, name, client, q.paths.StaffLauncherExe, StaffLauncherURL, before)
+			return ok, true, ready
 		}
 		java := ResolveJava(q.paths.Cristalix)
 		return StartLauncherJar(java, q.paths.LauncherJar, uuid, name, q.logs, func() {
-			q.launchExe(uuid, name, q.paths.StaffLauncherExe, StaffLauncherURL)
+			q.launchExe(uuid, name, client, q.paths.StaffLauncherExe, StaffLauncherURL, before)
 		}, func(p *os.Process) {
 			q.track(uuid, p)
-		}) == nil
+		}) == nil, false, nil
+	}
+}
+
+func waitLogReady(ch <-chan bool) bool {
+	if ch == nil {
+		return true
+	}
+	select {
+	case ok := <-ch:
+		return ok
+	case <-time.After(50 * time.Second):
+		return false
 	}
 }
 
@@ -158,27 +235,35 @@ func (q *LaunchQueue) run(uuid, client string) {
 		clientDir := filepath.Join(updates, effective)
 		if acc.Profile != "" {
 			applyProfile(q.paths.Profiles, acc.Profile, clientDir)
+			if launchIsStaff(acc.Name) {
+				applyProfile(q.paths.Profiles, acc.Profile, filepath.Join(updates, stagingClient))
+			}
 		}
 		applyClientOptionsAll(updates, acc)
 	}
-	if !q.launchFor(uuid, acc.Name) {
+	before := gameWindowPids()
+	launched, nativeTracked, logReady := q.launchFor(uuid, acc.Name, effective, before)
+	if !launched {
 		return
 	}
 	q.vault.MarkLaunched(uuid)
 	if q.cfg.AutoPlay() {
 		q.autoPlay(uuid)
 	}
-	time.Sleep(3 * time.Second)
+	if nativeTracked && !waitLogReady(logReady) {
+		return
+	}
+	q.procMu.Lock()
+	if lp := q.procs[uuid]; lp != nil {
+		before = append(before, uint32(lp.Pid))
+	}
+	q.procMu.Unlock()
+	if !nativeTracked {
+		q.tracker.bindGame(uuid, before)
+	}
 }
 
 func (q *LaunchQueue) autoPlay(uuid string) {
-	q.procMu.Lock()
-	p := q.procs[uuid]
-	q.procMu.Unlock()
-	if p != nil {
-		ClickPlayButtonForPid(p.Pid, autoPlayTimeout)
-		return
-	}
 	clickPlayButton(autoPlayTimeout)
 }
 
@@ -197,8 +282,13 @@ func (q *LaunchQueue) LaunchGroup(members []string, groupProfile string) {
 	}()
 
 	applied := map[string]bool{}
-	baseline := len(gameWindowPids())
-	launched := 0
+	groupHasStaff := false
+	for _, uuid := range members {
+		if a, ok := q.vault.Get(uuid); ok && a.Name != "" && launchIsStaff(a.Name) {
+			groupHasStaff = true
+			break
+		}
+	}
 	for _, uuid := range members {
 		acc, ok := q.vault.Get(uuid)
 		if !ok || acc.Name == "" || acc.Token == "" {
@@ -225,29 +315,34 @@ func (q *LaunchQueue) LaunchGroup(members []string, groupProfile string) {
 			if profile != "" && !applied[clientDir] {
 				applyProfile(q.paths.Profiles, profile, clientDir)
 				applied[clientDir] = true
+				if groupHasStaff {
+					applyProfile(q.paths.Profiles, profile, filepath.Join(updates, stagingClient))
+				}
 			}
 		}
 		applyClientOptionsAll(updates, acc)
 		q.tracker.noteLaunch(uuid)
-		if !q.launchFor(uuid, acc.Name) {
+		before := gameWindowPids()
+		launched, nativeTracked, logReady := q.launchFor(uuid, acc.Name, effective, before)
+		if !launched {
 			continue
 		}
 		q.vault.MarkLaunched(uuid)
 		if q.cfg.AutoPlay() {
 			q.autoPlay(uuid)
 		}
-		launched++
-		waitForWindowCount(baseline+launched, 120*time.Second)
-		time.Sleep(tokenConsumeDelay)
-	}
-}
-
-func waitForWindowCount(target int, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if len(gameWindowPids()) >= target {
-			return
+		if nativeTracked && !waitLogReady(logReady) {
+			time.Sleep(tokenConsumeDelay)
+			continue
 		}
-		time.Sleep(1 * time.Second)
+		q.procMu.Lock()
+		if lp := q.procs[uuid]; lp != nil {
+			before = append(before, uint32(lp.Pid))
+		}
+		q.procMu.Unlock()
+		if !nativeTracked {
+			q.tracker.bindGame(uuid, before)
+		}
+		time.Sleep(tokenConsumeDelay)
 	}
 }

@@ -200,7 +200,6 @@ function buildCard(acc) {
   const pin = document.createElement('button')
   pin.className = 'pin-btn'
   pin.innerHTML = STAR_SVG
-  pin.title = 'Закрепить'
   const chip = document.createElement('span')
   chip.className = 'grp-chip'
   chip.hidden = true
@@ -369,6 +368,7 @@ function fillCard(card, acc) {
     card._name.textContent = shortId(acc.uuid) + '…'
   }
   card._pin.classList.toggle('active', !!acc.pinned)
+  card._pin.title = acc.pinned ? 'Открепить' : 'Закрепить'
   if (acc.label) {
     card._labelTag.hidden = false
     card._labelTag.textContent = acc.label
@@ -474,7 +474,6 @@ function fillProfileSelect(acc) {
   state.profileDD.set(options, current)
 }
 
-// ---- Prompt ----
 let promptResolve = null
 function askName(title, initial) {
   return new Promise((resolve) => {
@@ -687,7 +686,6 @@ function bindRamSteppers(input, slider, onChange) {
   })
 }
 
-// ---- Profiles manager ----
 function openProfiles() {
   document.getElementById('profiles-overlay').hidden = false
   state.editingProfile = null
@@ -1166,6 +1164,7 @@ function openModal(acc) {
   document.getElementById('modal-name').textContent = acc.name || shortId(acc.uuid) + '…'
   document.getElementById('modal-uuid').textContent = acc.uuid
   document.getElementById('modal-pin').classList.toggle('active', !!acc.pinned)
+  document.getElementById('modal-pin').title = acc.pinned ? 'Открепить' : 'Закрепить'
   document.getElementById('modal-label').value = acc.label || ''
   fillProfileSelect(acc)
   loadProfiles().then(() => {
@@ -1221,15 +1220,68 @@ function loadSkinLib() {
   return skinLibPromise
 }
 
+async function textureExists(kind, uuid) {
+  try {
+    const r = await fetch(`/${kind}/${uuid}`, { method: 'HEAD' })
+    return r.ok
+  } catch (e) {
+    return false
+  }
+}
+
+const textureCache = new Map()
+function getTextureAvailability(uuid) {
+  if (textureCache.has(uuid)) return textureCache.get(uuid)
+  const p = Promise.all([textureExists('skin', uuid), textureExists('cape', uuid)]).then(([hasSkin, hasCape]) => ({
+    hasSkin,
+    hasCape,
+  }))
+  textureCache.set(uuid, p)
+  return p
+}
+
+function downloadTexture(kind, uuid, name) {
+  const a = document.createElement('a')
+  a.href = `/${kind}/${uuid}`
+  a.download = (name || uuid) + '_' + kind + '.png'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+const DEFAULT_ZOOM = 0.76
+
 async function mountSkin(uuid) {
   disposeSkin()
   state.skinToken = uuid
+  const dlWrap = document.getElementById('skin-downloads')
+  const dlSkinBtn = document.getElementById('dl-skin-btn')
+  const dlCapeBtn = document.getElementById('dl-cape-btn')
+  dlWrap.hidden = true
+  dlSkinBtn.hidden = true
+  dlCapeBtn.hidden = true
+
+  let avail
   try {
-    await loadSkinLib()
+    const [, a] = await Promise.all([loadSkinLib(), getTextureAvailability(uuid)])
+    avail = a
   } catch (e) {
     return
   }
   if (state.skinToken !== uuid) return
+
+  if (avail.hasSkin || avail.hasCape) {
+    dlWrap.hidden = false
+    if (avail.hasSkin) {
+      dlSkinBtn.hidden = false
+      dlSkinBtn.onclick = () => downloadTexture('skin', uuid, state.selected && state.selected.name)
+    }
+    if (avail.hasCape) {
+      dlCapeBtn.hidden = false
+      dlCapeBtn.onclick = () => downloadTexture('cape', uuid, state.selected && state.selected.name)
+    }
+  }
+
   const canvas = document.createElement('canvas')
   canvas.className = 'skin-canvas'
   skinStage.appendChild(canvas)
@@ -1246,7 +1298,7 @@ async function mountSkin(uuid) {
   viewer.controls.enableZoom = true
   viewer.controls.enablePan = false
   viewer.playerObject.rotation.y = 0.5
-  viewer.zoom = 0.9
+  viewer.zoom = DEFAULT_ZOOM
 
   const measure = () => ({
     width: skinStage.clientWidth || 210,
@@ -1585,7 +1637,7 @@ function renderGroupsManage() {
     row.className = 'gm-row'
     row.innerHTML =
       '<span class="gm-drag" title="Перетащить">⋮⋮</span>' +
-      '<button class="gm-pin' + (g.pinned ? ' on' : '') + '" data-act="pin" title="Закрепить">' + STAR_SVG + '</button>' +
+      '<button class="gm-pin' + (g.pinned ? ' on' : '') + '" data-act="pin" title="' + (g.pinned ? 'Открепить' : 'Закрепить') + '">' + STAR_SVG + '</button>' +
       '<span class="gm-name">' + esc(g.name) + '</span>' +
       '<button class="gm-members-toggle' + (expanded ? ' open' : '') + '" data-act="toggle">' +
       (g.members ? g.members.length : 0) + ' акк.' + CARET_SVG + '</button>' +
@@ -1681,7 +1733,7 @@ function groupDragOver(e) {
   else box.appendChild(dragging)
 }
 
-const logsState = { open: false, uuid: null, timer: null }
+const logsState = { open: false, uuid: null, session: null, timer: null }
 
 function openLogs() {
   logsState.open = true
@@ -1709,6 +1761,19 @@ function closeLogs() {
   }
 }
 
+function resetLogsSelection() {
+  logsState.uuid = null
+  logsState.session = null
+  document.getElementById('logs-current').textContent = 'Выбери аккаунт слева'
+  document.getElementById('logs-sessions').hidden = true
+  const meta = document.getElementById('logs-session-meta')
+  meta.hidden = true
+  meta.innerHTML = ''
+  const view = document.getElementById('logs-view')
+  view.classList.add('is-empty')
+  view.textContent = 'Выбери аккаунт слева, чтобы увидеть его лог'
+}
+
 async function refreshLogsSide() {
   let logs = []
   try {
@@ -1719,8 +1784,10 @@ async function refreshLogsSide() {
   }
   logs.sort((a, b) => Number(b.active) - Number(a.active) || (a.name || '').localeCompare(b.name || ''))
   const side = document.getElementById('logs-side')
+  document.getElementById('logs-clear').hidden = !logs.length
   if (!logs.length) {
     side.innerHTML = '<div class="logs-empty">Пока никого не запускали через ченджер</div>'
+    if (logsState.uuid) resetLogsSelection()
     return
   }
   side.innerHTML = logs
@@ -1752,23 +1819,106 @@ async function refreshLogsSide() {
   side.querySelectorAll('.logs-item').forEach((item) => {
     item.addEventListener('click', () => selectLog(item.dataset.uuid))
   })
+  if (logsState.uuid && !logs.some((l) => l.uuid === logsState.uuid)) {
+    resetLogsSelection()
+  }
+  if (!logsState.uuid && logs[0]) {
+    selectLog(logs[0].uuid)
+  }
 }
 
 function selectLog(uuid) {
   logsState.uuid = uuid
+  logsState.session = null
   const acc = state.byUuid.get(uuid)
   document.getElementById('logs-current').textContent = acc ? acc.name || shortId(uuid) : shortId(uuid)
-  document.getElementById('logs-clear').hidden = false
   document.querySelectorAll('#logs-side .logs-item').forEach((i) => i.classList.toggle('active', i.dataset.uuid === uuid))
   refreshLogsView(true)
+}
+
+function logSessionLabel(sessions, session) {
+  if (session.active) return 'Текущая'
+  const d = new Date(session.started * 1000)
+  const key = d.toLocaleDateString('ru-RU')
+  const number = sessions.filter((x) => new Date(x.started * 1000).toLocaleDateString('ru-RU') === key && x.started >= session.started).length
+  return String(d.getDate()).padStart(2, '0') + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + d.getFullYear() + ' (' + number + ')'
+}
+
+function logSessionTime(timestamp) {
+  if (!timestamp) return '—'
+  const d = new Date(timestamp * 1000)
+  const time = [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':')
+  const date = [d.getDate(), d.getMonth() + 1, d.getFullYear()].map((n) => String(n).padStart(2, '0')).join('-')
+  return time + ' ' + date
+}
+
+function renderLogSessions(sessions) {
+  const holder = document.getElementById('logs-sessions')
+  const meta = document.getElementById('logs-session-meta')
+  holder.hidden = !sessions.length
+  if (!sessions.length) {
+    meta.hidden = true
+    meta.innerHTML = ''
+    return
+  }
+  if (!logsState.session || !sessions.some((s) => s.id === logsState.session)) logsState.session = sessions[0].id
+  holder.innerHTML = sessions
+    .map(
+      (s) =>
+        '<button class="log-session' +
+        (s.id === logsState.session ? ' active' : '') +
+        '" data-session="' +
+        esc(s.id) +
+        '" data-current="' +
+        (s.active ? '1' : '0') +
+        '">' +
+        esc(logSessionLabel(sessions, s)) +
+        '</button>',
+    )
+    .join('')
+  holder.querySelectorAll('.log-session').forEach((b) => {
+    b.addEventListener('click', () => {
+      logsState.session = b.dataset.session
+      refreshLogsView(true)
+    })
+    if (b.dataset.current === '1') return
+    b.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      openLogSessionMenu(e.clientX, e.clientY, b.dataset.session, b.textContent)
+    })
+  })
+  const current = sessions.find((s) => s.id === logsState.session) || sessions[0]
+  meta.hidden = false
+  const endDot = current.active ? 'pending' : 'end'
+  const endValue = current.active ? 'Ещё идёт' : logSessionTime(current.ended)
+  meta.innerHTML =
+    '<div class="logs-session-meta-tile"><div class="logs-session-meta-value"><span class="logs-session-meta-dot start"></span><span class="logs-session-meta-text">' +
+    esc(logSessionTime(current.started)) +
+    '</span></div><div class="logs-session-meta-label">Начало сессии</div></div>' +
+    '<div class="logs-session-meta-tile"><div class="logs-session-meta-value' +
+    (current.active ? ' pending' : '') +
+    '"><span class="logs-session-meta-dot ' +
+    endDot +
+    '"></span><span class="logs-session-meta-text">' +
+    esc(endValue) +
+    '</span></div><div class="logs-session-meta-label">Конец сессии</div></div>'
+}
+
+function openLogSessionMenu(x, y, session, label) {
+  const m = document.getElementById('ctx-menu')
+  m.innerHTML = '<button class="ctx-item danger">Удалить сессию</button>'
+  m.querySelector('button').addEventListener('click', async () => { closeCardMenu(); if (!await confirmDialog('Удалить сессию?', 'Вы действительно хотите удалить сессию «' + esc(label) + '»?')) return; await apiPost('/api/logs/session/delete', { uuid: logsState.uuid, session }); logsState.session = null; refreshLogsView(true); refreshLogsSide() })
+  m.hidden = false; m.style.left = x + 'px'; m.style.top = y + 'px'; m.classList.add('show')
 }
 
 async function refreshLogsView(force) {
   if (!logsState.uuid) return
   let lines = []
   try {
-    const data = await apiGet('/api/logs/get?uuid=' + encodeURIComponent(logsState.uuid))
+    const suffix = logsState.session ? '&session=' + encodeURIComponent(logsState.session) : ''
+    const data = await apiGet('/api/logs/get?uuid=' + encodeURIComponent(logsState.uuid) + suffix)
     lines = data.lines || []
+    renderLogSessions(data.sessions || [])
   } catch (e) {
     return
   }
@@ -1870,6 +2020,7 @@ document.getElementById('modal-pin').addEventListener('click', async () => {
   if (!state.selected) return
   const next = !state.selected.pinned
   document.getElementById('modal-pin').classList.toggle('active', next)
+  document.getElementById('modal-pin').title = next ? 'Открепить' : 'Закрепить'
   try {
     await apiPost('/api/pin', { uuid: state.selected.uuid, pinned: next })
     state.selected.pinned = next
@@ -2726,21 +2877,50 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeCardMenu()
 })
 document.addEventListener('contextmenu', (e) => {
-  if (!e.target.closest('.acc-card')) closeCardMenu()
+  if (!e.target.closest('.acc-card') && !e.target.closest('.log-session')) closeCardMenu()
 })
 function setToggle(id, on) {
   const t = document.getElementById(id)
   t.classList.toggle('on', on)
   t.setAttribute('aria-checked', on ? 'true' : 'false')
 }
-const LAUNCHER_LABELS = { normal: 'Обычный лаунчер', jar: 'JAR-версия лаунчера', new: 'Новый лаунчер' }
+const LAUNCHER_LABELS = { normal: 'Обычный лаунчер', jar: 'JAR-версия лаунчера', new: 'Новый лаунчер', custom: 'Свой лаунчер' }
 let currentLauncher = 'jar'
+let customLauncherPath = ''
 function setLauncherUI(v) {
   currentLauncher = LAUNCHER_LABELS[v] ? v : 'jar'
   document.getElementById('launcher-dd-value').textContent = LAUNCHER_LABELS[currentLauncher]
   document.querySelectorAll('#launcher-dd-menu .launcher-dd-item').forEach((el) => {
     el.classList.toggle('on', el.dataset.val === currentLauncher)
   })
+  document.getElementById('custom-launcher-row').hidden = currentLauncher !== 'custom'
+}
+function updateCustomPathUI() {
+  const el = document.getElementById('custom-launcher-path')
+  if (customLauncherPath) {
+    el.textContent = customLauncherPath.split('\\').pop()
+    el.title = customLauncherPath
+  } else {
+    el.textContent = 'Файл не выбран'
+    el.title = ''
+  }
+}
+async function pickCustomLauncher() {
+  if (typeof window.acPickLauncher !== 'function') {
+    toast('Выбор файла доступен только в приложении', true)
+    return
+  }
+  const path = await window.acPickLauncher()
+  if (!path) return
+  try {
+    const r = await apiPost('/api/settings/custom-launcher', { path })
+    customLauncherPath = r.customLauncher || ''
+    updateCustomPathUI()
+    setLauncherUI(r.launcher)
+    toast('Свой лаунчер: ' + customLauncherPath.split('\\').pop())
+  } catch (err) {
+    toast(err.message, true)
+  }
 }
 function toggleLauncherMenu(force) {
   const dd = document.getElementById('launcher-dd')
@@ -2758,6 +2938,8 @@ async function openSettings() {
     setToggle('toggle-autostart', !!s.autostart)
     setToggle('toggle-autoplay', s.autoPlay !== false)
     setToggle('toggle-stats', s.stats !== false)
+    customLauncherPath = s.customLauncher || ''
+    updateCustomPathUI()
     setLauncherUI(s.launcher)
   } catch (e) {
     /* ignore */
@@ -2867,10 +3049,31 @@ document.getElementById('launcher-dd-trigger').addEventListener('click', (e) => 
   e.stopPropagation()
   toggleLauncherMenu()
 })
+document.getElementById('custom-launcher-browse').addEventListener('click', (e) => {
+  e.stopPropagation()
+  pickCustomLauncher()
+})
 document.querySelectorAll('#launcher-dd-menu .launcher-dd-item').forEach((el) => {
   el.addEventListener('click', async () => {
     const v = el.dataset.val
     toggleLauncherMenu(false)
+    if (v === 'custom') {
+      if (customLauncherPath) {
+        const prev = currentLauncher
+        setLauncherUI('custom')
+        try {
+          const r = await apiPost('/api/settings/launcher', { launcher: 'custom' })
+          setLauncherUI(r.launcher)
+          toast('Лаунчер: свой')
+        } catch (err) {
+          setLauncherUI(prev)
+          toast(err.message, true)
+        }
+      } else {
+        pickCustomLauncher()
+      }
+      return
+    }
     if (v === currentLauncher) return
     const prev = currentLauncher
     setLauncherUI(v)
@@ -2891,12 +3094,11 @@ document.getElementById('logs-overlay').addEventListener('click', (e) => {
   if (e.target.id === 'logs-overlay') closeLogs()
 })
 document.getElementById('logs-clear').addEventListener('click', async () => {
-  if (!logsState.uuid) return
-  await apiPost('/api/logs/clear', { uuid: logsState.uuid })
-  logsState.uuid = null
-  document.getElementById('logs-current').textContent = 'Выбери аккаунт слева'
-  document.getElementById('logs-clear').hidden = true
-  document.getElementById('logs-view').textContent = ''
+  const info = await apiPost('/api/logs/clear?info=1', {})
+  const mb = ((info.bytes || 0) / 1048576).toFixed(2)
+  if (!(await confirmDialog('Удалить все логи?', 'Вы действительно хотите удалить все записанные логи всех аккаунтов на ' + mb + ' MB?'))) return
+  await apiPost('/api/logs/clear', {})
+  resetLogsSelection()
   refreshLogsSide()
 })
 document.getElementById('groups-manage-list').addEventListener('dragover', groupDragOver)
@@ -3014,11 +3216,13 @@ setInterval(() => {
   }
   function show(el) {
     if (el.id === 'active-badge' && !document.getElementById('online-pop').hidden) return
-    let text = el.getAttribute('data-tip')
-    if (text == null && el.hasAttribute('title')) {
+    let text
+    if (el.hasAttribute('title')) {
       text = el.getAttribute('title')
       el.setAttribute('data-tip', text)
       el.removeAttribute('title')
+    } else {
+      text = el.getAttribute('data-tip')
     }
     if (!text) return
     cur = el

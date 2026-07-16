@@ -68,7 +68,8 @@ while ([DateTime]::UtcNow -lt $deadline) {
         $el.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
         Write-Output "clicked ИГРАТЬ"; exit 0
       }
-    } catch {}
+    }
+    catch {}
   }
   Start-Sleep -Milliseconds 100
 }

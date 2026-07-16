@@ -10,12 +10,14 @@ const (
 	LauncherNormal = "normal"
 	LauncherJar    = "jar"
 	LauncherNew    = "new"
+	LauncherCustom = "custom"
 )
 
 type AppConfig struct {
-	Launcher string `json:"launcher"`
-	AutoPlay *bool  `json:"autoPlay,omitempty"`
-	Stats    *bool  `json:"stats,omitempty"`
+	Launcher       string `json:"launcher"`
+	CustomLauncher string `json:"customLauncher,omitempty"`
+	AutoPlay       *bool  `json:"autoPlay,omitempty"`
+	Stats          *bool  `json:"stats,omitempty"`
 }
 
 type ConfigStore struct {
@@ -31,7 +33,8 @@ func OpenConfig(path string) *ConfigStore {
 	if data, err := os.ReadFile(path); err == nil {
 		var stored AppConfig
 		if json.Unmarshal(data, &stored) == nil {
-			if validLauncher(stored.Launcher) {
+			c.cfg.CustomLauncher = stored.CustomLauncher
+			if validLauncher(stored.Launcher) && (stored.Launcher != LauncherCustom || stored.CustomLauncher != "") {
 				c.cfg.Launcher = stored.Launcher
 			}
 			if stored.AutoPlay != nil {
@@ -83,7 +86,7 @@ func (c *ConfigStore) save() {
 }
 
 func validLauncher(v string) bool {
-	return v == LauncherNormal || v == LauncherJar || v == LauncherNew
+	return v == LauncherNormal || v == LauncherJar || v == LauncherNew || v == LauncherCustom
 }
 
 func (c *ConfigStore) Launcher() string {
@@ -92,13 +95,34 @@ func (c *ConfigStore) Launcher() string {
 	return c.cfg.Launcher
 }
 
+func (c *ConfigStore) CustomLauncher() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cfg.CustomLauncher
+}
+
 func (c *ConfigStore) SetLauncher(v string) bool {
 	if !validLauncher(v) {
 		return false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if v == LauncherCustom && c.cfg.CustomLauncher == "" {
+		return false
+	}
 	c.cfg.Launcher = v
+	c.save()
+	return true
+}
+
+func (c *ConfigStore) SetCustomLauncher(path string) bool {
+	if path == "" {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cfg.CustomLauncher = path
+	c.cfg.Launcher = LauncherCustom
 	c.save()
 	return true
 }

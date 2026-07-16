@@ -15,10 +15,6 @@ var procCallWindowProc = user32Win.NewProc("CallWindowProcW")
 var procLoadIcon = user32Win.NewProc("LoadIconW")
 var procLoadImage = user32Win.NewProc("LoadImageW")
 var procGetSystemMetrics = user32Win.NewProc("GetSystemMetrics")
-var procCreatePopupMenu = user32Win.NewProc("CreatePopupMenu")
-var procAppendMenu = user32Win.NewProc("AppendMenuW")
-var procTrackPopupMenu = user32Win.NewProc("TrackPopupMenu")
-var procDestroyMenu = user32Win.NewProc("DestroyMenu")
 var procGetCursorPos = user32Win.NewProc("GetCursorPos")
 var procPostMessage = user32Win.NewProc("PostMessageW")
 var procDestroyWindow = user32Win.NewProc("DestroyWindow")
@@ -43,7 +39,6 @@ const (
 	wmApp    = 0x8000
 	wmTray   = wmApp + 1
 	wmDoQuit = wmApp + 2
-	wmNull   = 0x0000
 
 	wmLButtonUp     = 0x0202
 	wmLButtonDblclk = 0x0203
@@ -91,14 +86,6 @@ const (
 	nifMessage = 0x1
 	nifIcon    = 0x2
 	nifTip     = 0x4
-
-	mfString       = 0x0
-	tpmRightButton = 0x2
-	tpmReturnCmd   = 0x100
-	tpmNoNotify    = 0x80
-
-	menuOpen  = 1
-	menuClose = 2
 
 	dwmwaWindowCornerPreference = 33
 	dwmwaBorderColor            = 34
@@ -317,35 +304,7 @@ func restoreWindow(hwnd uintptr) {
 }
 
 func showTrayMenu(hwnd uintptr) {
-	procSetForeground.Call(hwnd)
-
-	menu, _, _ := procCreatePopupMenu.Call()
-	openLabel := windows.StringToUTF16Ptr("Открыть")
-	closeLabel := windows.StringToUTF16Ptr("Закрыть")
-	procAppendMenu.Call(menu, mfString, menuOpen, uintptr(unsafe.Pointer(openLabel)))
-	procAppendMenu.Call(menu, mfString, menuClose, uintptr(unsafe.Pointer(closeLabel)))
-
-	var pt point
-	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
-
-	cmd, _, _ := procTrackPopupMenu.Call(
-		menu,
-		tpmRightButton|tpmReturnCmd|tpmNoNotify,
-		uintptr(pt.X),
-		uintptr(pt.Y),
-		0,
-		hwnd,
-		0,
-	)
-	procPostMessage.Call(hwnd, wmNull, 0, 0)
-	procDestroyMenu.Call(menu)
-
-	switch cmd {
-	case menuOpen:
-		restoreWindow(hwnd)
-	case menuClose:
-		quitApp(hwnd)
-	}
+	showTrayMenuCustom(hwnd)
 }
 
 func requestQuit(hwnd uintptr) {

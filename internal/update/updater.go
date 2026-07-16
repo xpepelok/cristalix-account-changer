@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const AppVersion = "0.2.0"
+const AppVersion = "0.3.1"
 const releaseAPI = "https://api.github.com/repos/xpepelok/cristalix-account-changer/releases/latest"
 
 type UpdateInfo struct {

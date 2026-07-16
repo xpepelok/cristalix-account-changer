@@ -18,6 +18,7 @@ type Paths struct {
 	StaffLauncherExe string
 	LauncherJar      string
 	Config           string
+	Logs             string
 }
 
 func Resolve() Paths {
@@ -39,6 +40,7 @@ func Resolve() Paths {
 		StaffLauncherExe: filepath.Join(data, "CristalixLauncher.exe"),
 		LauncherJar:      filepath.Join(data, "Cristalix.jar"),
 		Config:           filepath.Join(data, "config.json"),
+		Logs:             filepath.Join(data, "logs.json"),
 	}
 }
 
