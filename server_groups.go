@@ -171,6 +171,60 @@ func (s *Server) handleGroupLaunch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"started": true})
 }
 
+func (s *Server) handleGroupCloseAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		ID string `json:"id"`
+	}
+	if !decodeBody(r, &body) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	members, _, ok := s.vault.GroupMembers(body.ID)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "группа не найдена"})
+		return
+	}
+	s.queue.CancelGroup()
+	closed := 0
+	running, _ := s.tracker.Resolve()
+	for _, uuid := range members {
+		s.queue.KillProc(uuid)
+		if pid := running[uuid]; pid != 0 && platform.CloseGame(pid) {
+			closed++
+		}
+		s.tracker.Forget(uuid)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "closed": closed})
+}
+
+func (s *Server) handleGroupLaunchPause(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": s.queue.PauseGroup()})
+}
+
+func (s *Server) handleGroupLaunchResume(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": s.queue.ResumeGroup()})
+}
+
+func (s *Server) handleGroupLaunchProgress(w http.ResponseWriter, r *http.Request) {
+	active, paused, done, total, skips := s.queue.GroupProgress()
+	if skips == nil {
+		skips = []launcher.GroupSkip{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"active": active, "paused": paused, "done": done, "total": total, "skipped": skips})
+}
+
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"autostart": platform.AutostartEnabled(), "launcher": s.cfg.Launcher(), "customLauncher": s.cfg.CustomLauncher(), "autoPlay": s.cfg.AutoPlay(), "stats": s.cfg.Stats()})
 }

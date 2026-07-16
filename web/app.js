@@ -15,6 +15,7 @@ const state = {
   editorFiles: {},
   groups: [],
   selectedGroup: null,
+  groupLaunchProgress: null,
   filters: { groups: new Set(), noRole: false, expired: false },
   sort: { key: null, dir: 'desc' },
 }
@@ -246,7 +247,9 @@ function buildCard(acc) {
 
   card.addEventListener('click', () => {
     const current = cardAccount(card)
-    if (current) openModal(current)
+    if (!current) return
+    playSound('tap')
+    openModal(current)
   })
   playBtn.addEventListener('click', (e) => {
     e.stopPropagation()
@@ -495,11 +498,12 @@ function closePrompt(value) {
 }
 
 let confirmResolve = null
-function confirmDialog(title, text) {
+function confirmDialog(title, text, yesLabel) {
   return new Promise((resolve) => {
     confirmResolve = resolve
     document.getElementById('confirm-title').textContent = title
     document.getElementById('confirm-text').innerHTML = text
+    document.getElementById('confirm-yes').textContent = yesLabel || 'Да, удалить'
     document.getElementById('confirm-overlay').hidden = false
   })
 }
@@ -1483,9 +1487,71 @@ async function launchActiveGroup() {
   try {
     await apiPost('/api/groups/launch', { id: group.id })
     toast('Запускаю аккаунты группы поочерёдно…')
+    pollGroupLaunchProgress()
   } catch (e) {
     toast(e.message, true)
   }
+}
+
+function renderGroupLaunchButton(p) {
+  const btn = document.getElementById('group-launch')
+  const label = btn.querySelector('.group-launch-label')
+  const playIcon = btn.querySelector('.group-launch-play')
+
+  if (!p || !p.active) {
+    btn.classList.remove('launching', 'paused')
+    playIcon.style.display = ''
+    label.textContent = 'Запустить все'
+    btn.title = 'Запустить все аккаунты группы поочерёдно'
+    return
+  }
+
+  btn.classList.add('launching')
+  btn.classList.toggle('paused', p.paused)
+  playIcon.style.display = 'none'
+  if (p.paused) {
+    label.textContent = 'Возобновить'
+    btn.title = 'Возобновить запуск аккаунтов'
+  } else {
+    label.textContent = 'Остановить'
+    btn.title = 'Остановить запуск аккаунтов'
+  }
+}
+
+async function pollGroupLaunchProgress() {
+  try {
+    const p = await apiGet('/api/groups/launch/progress')
+    state.groupLaunchProgress = p
+    renderGroupLaunchButton(p)
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+async function closeAllGroupAccounts() {
+  const group = activeGroup()
+  if (!group) return
+  if (!(await confirmDialog('Закрыть все аккаунты?', 'Будут закрыты все запущенные на данный момент аккаунты группы «' + esc(group.name) + '».', 'Да, закрыть'))) return
+  try {
+    const res = await apiPost('/api/groups/close-all', { id: group.id })
+    toast(res.closed ? 'Закрыто аккаунтов: ' + res.closed : 'Запущенных аккаунтов не было')
+    loadAccounts()
+    pollGroupLaunchProgress()
+  } catch (e) {
+    toast(e.message, true)
+  }
+}
+
+async function toggleGroupLaunchPause() {
+  const p = state.groupLaunchProgress
+  if (!p || !p.active) return
+  try {
+    if (p.paused) await apiPost('/api/groups/launch/resume', {})
+    else await apiPost('/api/groups/launch/pause', {})
+  } catch (e) {
+    toast(e.message, true)
+  }
+  pollGroupLaunchProgress()
 }
 
 function addTargetGroup() {
@@ -1890,7 +1956,7 @@ function renderLogSessions(sessions) {
   const current = sessions.find((s) => s.id === logsState.session) || sessions[0]
   meta.hidden = false
   const endDot = current.active ? 'pending' : 'end'
-  const endValue = current.active ? 'Ещё идёт' : logSessionTime(current.ended)
+  const endValue = current.active ? 'Активна' : logSessionTime(current.ended)
   meta.innerHTML =
     '<div class="logs-session-meta-tile"><div class="logs-session-meta-value"><span class="logs-session-meta-dot start"></span><span class="logs-session-meta-text">' +
     esc(logSessionTime(current.started)) +
@@ -2820,7 +2886,16 @@ document.addEventListener('keydown', (e) => {
     }
   }
 })
-document.getElementById('group-launch').addEventListener('click', launchActiveGroup)
+document.getElementById('group-launch').addEventListener('click', () => {
+  const p = state.groupLaunchProgress
+  if (!p || !p.active) {
+    launchActiveGroup()
+    return
+  }
+  toggleGroupLaunchPause()
+})
+document.getElementById('group-close-all').addEventListener('click', closeAllGroupAccounts)
+setInterval(pollGroupLaunchProgress, 700)
 document.getElementById('group-add').addEventListener('click', () => openAddMembers())
 document.getElementById('group-add-center').addEventListener('click', () => openAddMembers())
 document.getElementById('group-ram').addEventListener('click', openRamModal)

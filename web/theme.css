@@ -2438,12 +2438,24 @@ a {
   align-items: center;
   gap: 7px;
 }
+.group-launch-btn {
+  min-width: 163px;
+  justify-content: center;
+}
+.group-launch-btn svg[hidden] {
+  display: none;
+}
+.group-close-all-btn {
+  width: 40px;
+  height: 40px;
+}
 .group-profile-row {
   display: flex;
   align-items: center;
   gap: 8px;
   height: 40px;
   padding: 0 6px 0 12px;
+  margin-right: 2px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface);

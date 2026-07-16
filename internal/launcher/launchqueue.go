@@ -21,19 +21,32 @@ func launchIsStaff(name string) bool {
 	return staff != "" && !strings.EqualFold(staff, "PLAYER")
 }
 
+func shortUUID(uuid string) string {
+	if len(uuid) > 8 {
+		return uuid[:8]
+	}
+	return uuid
+}
+
 type LaunchQueue struct {
-	paths       platform.Paths
-	vault       *vault.Vault
-	tracker     *GameTracker
-	jobs        chan string
-	mu          sync.Mutex
-	pending     map[string]bool
-	client      map[string]string
-	groupActive bool
-	logs        *LogStore
-	cfg         *config.ConfigStore
-	procMu      sync.Mutex
-	procs       map[string]*os.Process
+	paths          platform.Paths
+	vault          *vault.Vault
+	tracker        *GameTracker
+	jobs           chan string
+	mu             sync.Mutex
+	pending        map[string]bool
+	client         map[string]string
+	groupActive    bool
+	groupPaused    bool
+	groupCancelled bool
+	groupDone      int
+	groupTotal     int
+	groupResumeCh  chan struct{}
+	groupSkips     []GroupSkip
+	logs           *LogStore
+	cfg            *config.ConfigStore
+	procMu         sync.Mutex
+	procs          map[string]*os.Process
 }
 
 func NewLaunchQueue(paths platform.Paths, vault *vault.Vault, tracker *GameTracker, logs *LogStore, cfg *config.ConfigStore) *LaunchQueue {
@@ -267,6 +280,78 @@ func (q *LaunchQueue) autoPlay(uuid string) {
 	clickPlayButton(autoPlayTimeout)
 }
 
+func (q *LaunchQueue) PauseGroup() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if !q.groupActive || q.groupPaused {
+		return false
+	}
+	q.groupPaused = true
+	q.groupResumeCh = make(chan struct{})
+	return true
+}
+
+func (q *LaunchQueue) ResumeGroup() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if !q.groupActive || !q.groupPaused {
+		return false
+	}
+	q.groupPaused = false
+	if q.groupResumeCh != nil {
+		close(q.groupResumeCh)
+		q.groupResumeCh = nil
+	}
+	return true
+}
+
+func (q *LaunchQueue) CancelGroup() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if !q.groupActive {
+		return false
+	}
+	q.groupCancelled = true
+	if q.groupPaused {
+		q.groupPaused = false
+		if q.groupResumeCh != nil {
+			close(q.groupResumeCh)
+			q.groupResumeCh = nil
+		}
+	}
+	return true
+}
+
+type GroupSkip struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
+func (q *LaunchQueue) GroupProgress() (active, paused bool, done, total int, skips []GroupSkip) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.groupActive, q.groupPaused, q.groupDone, q.groupTotal, append([]GroupSkip(nil), q.groupSkips...)
+}
+
+func (q *LaunchQueue) recordGroupSkip(name, reason string) {
+	q.mu.Lock()
+	q.groupSkips = append(q.groupSkips, GroupSkip{Name: name, Reason: reason})
+	q.mu.Unlock()
+}
+
+func (q *LaunchQueue) waitIfGroupPaused() {
+	for {
+		q.mu.Lock()
+		if !q.groupPaused || q.groupCancelled {
+			q.mu.Unlock()
+			return
+		}
+		ch := q.groupResumeCh
+		q.mu.Unlock()
+		<-ch
+	}
+}
+
 func (q *LaunchQueue) LaunchGroup(members []string, groupProfile string) {
 	q.mu.Lock()
 	if q.groupActive {
@@ -274,10 +359,19 @@ func (q *LaunchQueue) LaunchGroup(members []string, groupProfile string) {
 		return
 	}
 	q.groupActive = true
+	q.groupPaused = false
+	q.groupCancelled = false
+	q.groupDone = 0
+	q.groupTotal = len(members)
+	q.groupSkips = nil
 	q.mu.Unlock()
 	defer func() {
 		q.mu.Lock()
 		q.groupActive = false
+		q.groupPaused = false
+		q.groupCancelled = false
+		q.groupDone = 0
+		q.groupTotal = 0
 		q.mu.Unlock()
 	}()
 
@@ -290,59 +384,78 @@ func (q *LaunchQueue) LaunchGroup(members []string, groupProfile string) {
 		}
 	}
 	for _, uuid := range members {
-		acc, ok := q.vault.Get(uuid)
-		if !ok || acc.Name == "" || acc.Token == "" {
-			continue
+		q.waitIfGroupPaused()
+		q.mu.Lock()
+		cancelled := q.groupCancelled
+		q.mu.Unlock()
+		if cancelled {
+			break
 		}
-		if running, _ := q.tracker.Resolve(); running[uuid] != 0 {
-			continue
-		}
-		effective := acc.Client
-		if effective == "" {
-			effective = CurrentClient(q.paths.LauncherCfg)
-		}
-		platform.ClearStaleLocks(q.paths.Cristalix)
-		if ApplyAccount(q.paths.LauncherCfg, acc.Name, acc.Token, effective, AccountLaunchOpts(acc)) != nil {
-			continue
-		}
-		profile := groupProfile
-		if profile == "" {
-			profile = acc.Profile
-		}
-		updates := UpdatesDir(q.paths.LauncherCfg, q.paths.Updates)
-		if effective != "" {
-			clientDir := filepath.Join(updates, effective)
-			if profile != "" && !applied[clientDir] {
-				applyProfile(q.paths.Profiles, profile, clientDir)
-				applied[clientDir] = true
-				if groupHasStaff {
-					applyProfile(q.paths.Profiles, profile, filepath.Join(updates, stagingClient))
+		func() {
+			defer func() {
+				q.mu.Lock()
+				q.groupDone++
+				q.mu.Unlock()
+			}()
+			acc, ok := q.vault.Get(uuid)
+			if !ok || acc.Name == "" || acc.Token == "" {
+				q.recordGroupSkip(shortUUID(uuid), "нет сохранённого токена")
+				return
+			}
+			if running, _ := q.tracker.Resolve(); running[uuid] != 0 {
+				q.recordGroupSkip(acc.Name, "уже запущен")
+				return
+			}
+			effective := acc.Client
+			if effective == "" {
+				effective = CurrentClient(q.paths.LauncherCfg)
+			}
+			platform.ClearStaleLocks(q.paths.Cristalix)
+			if ApplyAccount(q.paths.LauncherCfg, acc.Name, acc.Token, effective, AccountLaunchOpts(acc)) != nil {
+				q.recordGroupSkip(acc.Name, "не удалось применить токен")
+				return
+			}
+			profile := groupProfile
+			if profile == "" {
+				profile = acc.Profile
+			}
+			updates := UpdatesDir(q.paths.LauncherCfg, q.paths.Updates)
+			if effective != "" {
+				clientDir := filepath.Join(updates, effective)
+				if profile != "" && !applied[clientDir] {
+					applyProfile(q.paths.Profiles, profile, clientDir)
+					applied[clientDir] = true
+					if groupHasStaff {
+						applyProfile(q.paths.Profiles, profile, filepath.Join(updates, stagingClient))
+					}
 				}
 			}
-		}
-		applyClientOptionsAll(updates, acc)
-		q.tracker.noteLaunch(uuid)
-		before := gameWindowPids()
-		launched, nativeTracked, logReady := q.launchFor(uuid, acc.Name, effective, before)
-		if !launched {
-			continue
-		}
-		q.vault.MarkLaunched(uuid)
-		if q.cfg.AutoPlay() {
-			q.autoPlay(uuid)
-		}
-		if nativeTracked && !waitLogReady(logReady) {
+			applyClientOptionsAll(updates, acc)
+			q.tracker.noteLaunch(uuid)
+			before := gameWindowPids()
+			launched, nativeTracked, logReady := q.launchFor(uuid, acc.Name, effective, before)
+			if !launched {
+				q.recordGroupSkip(acc.Name, "лаунчер не запустился")
+				return
+			}
+			q.vault.MarkLaunched(uuid)
+			if q.cfg.AutoPlay() {
+				q.autoPlay(uuid)
+			}
+			if nativeTracked && !waitLogReady(logReady) {
+				q.recordGroupSkip(acc.Name, "лаунчер не подтвердил вход за 50с")
+				time.Sleep(tokenConsumeDelay)
+				return
+			}
+			q.procMu.Lock()
+			if lp := q.procs[uuid]; lp != nil {
+				before = append(before, uint32(lp.Pid))
+			}
+			q.procMu.Unlock()
+			if !nativeTracked {
+				q.tracker.bindGame(uuid, before)
+			}
 			time.Sleep(tokenConsumeDelay)
-			continue
-		}
-		q.procMu.Lock()
-		if lp := q.procs[uuid]; lp != nil {
-			before = append(before, uint32(lp.Pid))
-		}
-		q.procMu.Unlock()
-		if !nativeTracked {
-			q.tracker.bindGame(uuid, before)
-		}
-		time.Sleep(tokenConsumeDelay)
+		}()
 	}
 }

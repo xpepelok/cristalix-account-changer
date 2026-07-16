@@ -99,9 +99,9 @@
           <div class="group-menu" id="group-menu" hidden></div>
         </div>
         <div class="group-actions" id="group-actions" hidden>
-          <button class="action-btn primary" id="group-launch" title="Запустить все аккаунты группы поочерёдно">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-            Запустить все
+          <button class="action-btn primary group-launch-btn" id="group-launch" title="Запустить все аккаунты группы поочерёдно">
+            <svg class="group-launch-play" viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+            <span class="group-launch-label">Запустить все</span>
           </button>
           <button class="action-btn primary" id="group-add">Добавить аккаунты</button>
           <button class="action-btn primary" id="group-ram" title="Настройки запуска для аккаунтов группы">Настройки запуска</button>
@@ -110,6 +110,9 @@
             <span class="client-label">Профиль</span>
             <div class="ac-dd" id="group-profile-select"></div>
           </div>
+          <button class="icon-danger-btn group-close-all-btn" id="group-close-all" title="Закрыть все запущенные аккаунты группы" aria-label="Закрыть все запущенные аккаунты группы">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M9 9l6 6M15 9l-6 6" /></svg>
+          </button>
         </div>
         <div class="filter-dd" id="filter-dd">
           <button class="filter-trigger icon-only" id="filter-trigger" title="Фильтры и сортировка">
