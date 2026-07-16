@@ -70,12 +70,7 @@ func ApplyAccount(path, name, token, client string, opts vault.LaunchOpts) error
 	if err != nil {
 		return err
 	}
-	accounts, _ := cfg["accounts"].(map[string]any)
-	if accounts == nil {
-		accounts = map[string]any{}
-	}
-	accounts[name] = token
-	cfg["accounts"] = accounts
+	cfg["accounts"] = map[string]any{name: token}
 	cfg["currentAccount"] = name
 	if client != "" {
 		cfg["lastClient"] = client

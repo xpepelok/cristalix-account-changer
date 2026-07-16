@@ -171,8 +171,81 @@ func (s *Server) handleGroupLaunch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"started": true})
 }
 
+func (s *Server) handleGroupCloseAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		ID string `json:"id"`
+	}
+	if !decodeBody(r, &body) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	members, _, ok := s.vault.GroupMembers(body.ID)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "группа не найдена"})
+		return
+	}
+	s.queue.CancelGroup()
+	closed := 0
+	running, _ := s.tracker.Resolve()
+	for _, uuid := range members {
+		s.queue.KillProc(uuid)
+		if pid := running[uuid]; pid != 0 && platform.CloseGame(pid) {
+			closed++
+		}
+		s.tracker.Forget(uuid)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "closed": closed})
+}
+
+func (s *Server) handleGroupLaunchPause(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": s.queue.PauseGroup()})
+}
+
+func (s *Server) handleGroupLaunchResume(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": s.queue.ResumeGroup()})
+}
+
+func (s *Server) handleGroupLaunchProgress(w http.ResponseWriter, r *http.Request) {
+	active, paused, done, total, skips := s.queue.GroupProgress()
+	if skips == nil {
+		skips = []launcher.GroupSkip{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"active": active, "paused": paused, "done": done, "total": total, "skipped": skips})
+}
+
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"autostart": platform.AutostartEnabled(), "launcher": s.cfg.Launcher(), "autoPlay": s.cfg.AutoPlay(), "stats": s.cfg.Stats()})
+	writeJSON(w, http.StatusOK, map[string]any{"autostart": platform.AutostartEnabled(), "launcher": s.cfg.Launcher(), "customLauncher": s.cfg.CustomLauncher(), "autoPlay": s.cfg.AutoPlay(), "stats": s.cfg.Stats()})
+}
+
+func (s *Server) handleSettingsCustomLauncher(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Path string `json:"path"`
+	}
+	if !decodeBody(r, &body) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	if !s.cfg.SetCustomLauncher(body.Path) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "не указан путь к лаунчеру"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"launcher": s.cfg.Launcher(), "customLauncher": s.cfg.CustomLauncher()})
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -260,12 +333,13 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogsGet(w http.ResponseWriter, r *http.Request) {
 	uuid := r.URL.Query().Get("uuid")
-	lines, ok := s.logs.Get(uuid)
+	session := r.URL.Query().Get("session")
+	lines, ok := s.logs.Get(uuid, session)
 	if !ok {
-		writeJSON(w, http.StatusOK, map[string]any{"lines": []launcher.LogLine{}})
+		writeJSON(w, http.StatusOK, map[string]any{"lines": []launcher.LogLine{}, "sessions": []any{}})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"lines": lines})
+	writeJSON(w, http.StatusOK, map[string]any{"lines": lines, "sessions": s.logs.Sessions(uuid)})
 }
 
 func (s *Server) handleLogsClear(w http.ResponseWriter, r *http.Request) {
@@ -273,13 +347,27 @@ func (s *Server) handleLogsClear(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if r.URL.Query().Get("info") == "1" {
+		writeJSON(w, http.StatusOK, map[string]any{"bytes": s.logs.SizeAll()})
+		return
+	}
+	s.logs.ClearAll()
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleLogSessionDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	var body struct {
-		UUID string `json:"uuid"`
+		UUID    string `json:"uuid"`
+		Session string `json:"session"`
 	}
 	if !decodeBody(r, &body) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	s.logs.Clear(body.UUID)
+	s.logs.DeleteSession(body.UUID, body.Session)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

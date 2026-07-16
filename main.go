@@ -66,7 +66,7 @@ func main() {
 	watcher := &launcher.Watcher{Paths: paths, Vault: vaultStore}
 	tracker := launcher.NewGameTracker(paths.Session)
 	launcher.SeedTracker(tracker, vaultStore)
-	logs := launcher.NewLogStore()
+	logs := launcher.NewLogStore(paths.Logs)
 
 	go func() {
 		_ = launcher.EnsureLauncherFrom(paths.LauncherJar, launcher.JarLauncherURL)
@@ -98,4 +98,5 @@ func main() {
 		platform.OpenBrowser(appURL, paths.WebProfile)
 		<-srv.quit
 	}
+	logs.Flush()
 }

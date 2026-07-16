@@ -96,6 +96,9 @@ func RunNativeWindow(url, dataPath string, onReady func(focus, quit func())) (ra
 		}
 		return false
 	})
+	view.Bind("acPickLauncher", func() string {
+		return PickExecutable()
+	})
 	view.Navigate(url)
 	view.Run()
 	return true

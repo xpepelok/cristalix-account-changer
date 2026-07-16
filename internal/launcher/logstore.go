@@ -2,85 +2,181 @@ package launcher
 
 import (
 	"bufio"
+	"encoding/json"
+	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
 )
 
 const maxLogLines = 4000
+const logPersistInterval = 3 * time.Second
 
 type LogLine struct {
 	At   int64  `json:"at"`
 	Text string `json:"text"`
 }
-
+type logSession struct {
+	ID      string
+	Started int64
+	Ended   int64
+	Active  bool
+	Lines   []LogLine
+}
+type logSessionInfo struct {
+	ID      string `json:"id"`
+	Started int64  `json:"started"`
+	Ended   int64  `json:"ended"`
+	Active  bool   `json:"active"`
+	Lines   int    `json:"lines"`
+}
 type clientLog struct {
-	uuid    string
-	name    string
-	started int64
-	active  bool
-	lines   []LogLine
+	uuid     string
+	name     string
+	sessions []*logSession
 }
-
 type LogStore struct {
-	mu   sync.Mutex
-	logs map[string]*clientLog
+	mu       sync.Mutex
+	logs     map[string]*clientLog
+	path     string
+	lastSave time.Time
 }
 
-func NewLogStore() *LogStore {
-	return &LogStore{logs: map[string]*clientLog{}}
+type persistedSession struct {
+	ID      string    `json:"id"`
+	Started int64     `json:"started"`
+	Ended   int64     `json:"ended"`
+	Active  bool      `json:"active"`
+	Lines   []LogLine `json:"lines"`
 }
+type persistedClientLog struct {
+	Name     string             `json:"name"`
+	Sessions []persistedSession `json:"sessions"`
+}
+
+func NewLogStore(path string) *LogStore {
+	s := &LogStore{logs: map[string]*clientLog{}, path: path}
+	s.load()
+	return s
+}
+
+func (s *LogStore) load() {
+	if s.path == "" {
+		return
+	}
+	data, err := os.ReadFile(s.path)
+	if err != nil {
+		return
+	}
+	var snapshot map[string]persistedClientLog
+	if json.Unmarshal(data, &snapshot) != nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for uuid, pcl := range snapshot {
+		cl := &clientLog{uuid: uuid, name: pcl.Name}
+		for _, ps := range pcl.Sessions {
+			sess := &logSession{ID: ps.ID, Started: ps.Started, Ended: ps.Ended, Active: ps.Active, Lines: ps.Lines}
+			if sess.Active {
+				sess.Active = false
+				sess.Ended = lastLineAt(sess)
+			}
+			cl.sessions = append(cl.sessions, sess)
+		}
+		s.logs[uuid] = cl
+	}
+}
+
+func (s *LogStore) persist() {
+	if s.path == "" {
+		return
+	}
+	s.mu.Lock()
+	snapshot := make(map[string]persistedClientLog, len(s.logs))
+	for uuid, cl := range s.logs {
+		sessions := make([]persistedSession, len(cl.sessions))
+		for i, x := range cl.sessions {
+			sessions[i] = persistedSession{ID: x.ID, Started: x.Started, Ended: x.Ended, Active: x.Active, Lines: append([]LogLine(nil), x.Lines...)}
+		}
+		snapshot[uuid] = persistedClientLog{Name: cl.name, Sessions: sessions}
+	}
+	s.lastSave = time.Now()
+	s.mu.Unlock()
+
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		return
+	}
+	tmp := s.path + ".tmp"
+	if os.WriteFile(tmp, data, 0o644) == nil {
+		_ = os.Rename(tmp, s.path)
+	}
+}
+
+func (s *LogStore) Flush() { s.persist() }
 
 func (s *LogStore) begin(uuid, name string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	cl, ok := s.logs[uuid]
-	if !ok {
-		cl = &clientLog{uuid: uuid, name: name}
+	cl := s.logs[uuid]
+	if cl == nil {
+		cl = &clientLog{uuid: uuid}
 		s.logs[uuid] = cl
 	}
-	cl.name = name
-	cl.started = time.Now().Unix()
-	cl.active = true
-	cl.lines = append(cl.lines, LogLine{At: time.Now().Unix(), Text: "──── запуск ────"})
-	s.trim(cl)
-}
-
-func (s *LogStore) unsupported(uuid, name, msg string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.logs[uuid] = &clientLog{
-		uuid:    uuid,
-		name:    name,
-		started: time.Now().Unix(),
-		active:  false,
-		lines:   []LogLine{{At: time.Now().Unix(), Text: msg}},
+	if previous := s.current(cl); previous != nil && previous.Active {
+		previous.Active = false
+		previous.Ended = lastLineAt(previous)
 	}
+	cl.name = name
+	now := time.Now().Unix()
+	cl.sessions = append(cl.sessions, &logSession{ID: fmt.Sprintf("%d", time.Now().UnixNano()), Started: now, Active: true})
+	s.mu.Unlock()
+	s.persist()
 }
-
+func (s *LogStore) unsupported(uuid, name, msg string) {
+	s.begin(uuid, name)
+	s.append(uuid, msg)
+	s.finish(uuid)
+}
+func (s *LogStore) current(cl *clientLog) *logSession {
+	if cl == nil || len(cl.sessions) == 0 {
+		return nil
+	}
+	return cl.sessions[len(cl.sessions)-1]
+}
 func (s *LogStore) append(uuid, text string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	cl, ok := s.logs[uuid]
-	if !ok {
+	session := s.current(s.logs[uuid])
+	if session == nil {
+		s.mu.Unlock()
 		return
 	}
-	cl.lines = append(cl.lines, LogLine{At: time.Now().Unix(), Text: text})
-	s.trim(cl)
+	session.Lines = append(session.Lines, LogLine{At: time.Now().Unix(), Text: text})
+	if len(session.Lines) > maxLogLines {
+		session.Lines = session.Lines[len(session.Lines)-maxLogLines:]
+	}
+	shouldSave := time.Since(s.lastSave) > logPersistInterval
+	s.mu.Unlock()
+	if shouldSave {
+		s.persist()
+	}
 }
-
 func (s *LogStore) finish(uuid string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if cl, ok := s.logs[uuid]; ok {
-		cl.active = false
+	if session := s.current(s.logs[uuid]); session != nil && session.Active {
+		session.Active = false
+		session.Ended = lastLineAt(session)
 	}
+	s.mu.Unlock()
+	s.persist()
 }
 
-func (s *LogStore) trim(cl *clientLog) {
-	if len(cl.lines) > maxLogLines {
-		cl.lines = cl.lines[len(cl.lines)-maxLogLines:]
+func lastLineAt(session *logSession) int64 {
+	if len(session.Lines) > 0 {
+		return session.Lines[len(session.Lines)-1].At
 	}
+	return time.Now().Unix()
 }
 
 type logSummary struct {
@@ -95,33 +191,124 @@ func (s *LogStore) Summaries() []logSummary {
 	defer s.mu.Unlock()
 	out := make([]logSummary, 0, len(s.logs))
 	for _, cl := range s.logs {
-		out = append(out, logSummary{UUID: cl.uuid, Name: cl.name, Lines: len(cl.lines), Active: cl.active})
+		cur := s.current(cl)
+		if cur != nil {
+			out = append(out, logSummary{cl.uuid, cl.name, len(cur.Lines), cur.Active})
+		}
 	}
 	return out
 }
-
-func (s *LogStore) Get(uuid string) ([]LogLine, bool) {
+func (s *LogStore) Sessions(uuid string) []logSessionInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cl, ok := s.logs[uuid]
-	if !ok {
+	cl := s.logs[uuid]
+	if cl == nil {
+		return nil
+	}
+	out := make([]logSessionInfo, 0, len(cl.sessions))
+	for i := len(cl.sessions) - 1; i >= 0; i-- {
+		x := cl.sessions[i]
+		out = append(out, logSessionInfo{x.ID, x.Started, x.Ended, x.Active, len(x.Lines)})
+	}
+	return out
+}
+func (s *LogStore) Get(uuid, id string) ([]LogLine, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cl := s.logs[uuid]
+	if cl == nil {
 		return nil, false
 	}
-	out := make([]LogLine, len(cl.lines))
-	copy(out, cl.lines)
+	session := s.current(cl)
+	if id != "" {
+		for _, x := range cl.sessions {
+			if x.ID == id {
+				session = x
+				break
+			}
+		}
+	}
+	if session == nil {
+		return nil, false
+	}
+	out := append([]LogLine(nil), session.Lines...)
 	return out, true
 }
-
 func (s *LogStore) Clear(uuid string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	delete(s.logs, uuid)
+	s.mu.Unlock()
+	s.persist()
 }
-
+func (s *LogStore) ClearAll() {
+	s.mu.Lock()
+	for uuid, cl := range s.logs {
+		out := cl.sessions[:0]
+		for _, x := range cl.sessions {
+			if x.Active {
+				out = append(out, x)
+			}
+		}
+		cl.sessions = out
+		if len(cl.sessions) == 0 {
+			delete(s.logs, uuid)
+		}
+	}
+	s.mu.Unlock()
+	s.persist()
+}
+func (s *LogStore) DeleteSession(uuid, id string) {
+	s.mu.Lock()
+	cl := s.logs[uuid]
+	if cl == nil {
+		s.mu.Unlock()
+		return
+	}
+	out := cl.sessions[:0]
+	for _, x := range cl.sessions {
+		if x.ID != id || x.Active {
+			out = append(out, x)
+		}
+	}
+	cl.sessions = out
+	if len(cl.sessions) == 0 {
+		delete(s.logs, uuid)
+	}
+	s.mu.Unlock()
+	s.persist()
+}
+func (s *LogStore) Size(uuid string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cl := s.logs[uuid]
+	if cl == nil {
+		return 0
+	}
+	n := 0
+	for _, x := range cl.sessions {
+		for _, line := range x.Lines {
+			n += len(line.Text) + 1
+		}
+	}
+	return n
+}
+func (s *LogStore) SizeAll() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, cl := range s.logs {
+		for _, x := range cl.sessions {
+			for _, line := range x.Lines {
+				n += len(line.Text) + 1
+			}
+		}
+	}
+	return n
+}
 func (s *LogStore) pump(uuid string, r io.Reader) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		s.append(uuid, scanner.Text())
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		s.append(uuid, sc.Text())
 	}
 }

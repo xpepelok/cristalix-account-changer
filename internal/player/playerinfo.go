@@ -86,6 +86,16 @@ func initPlayerClient() {
 	}
 }
 
+func CachedStaff(name string) string {
+	key := strings.ToLower(name)
+	playerCacheMu.Lock()
+	defer playerCacheMu.Unlock()
+	if hit, ok := playerCache[key]; ok && hit.info != nil {
+		return hit.info.Staff
+	}
+	return ""
+}
+
 func FetchPlayerInfo(name string) *PlayerInfo {
 	key := strings.ToLower(name)
 

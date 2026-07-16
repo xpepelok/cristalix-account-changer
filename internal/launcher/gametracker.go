@@ -126,6 +126,80 @@ func (t *GameTracker) Forget(uuid string) {
 	t.persist()
 }
 
+func (t *GameTracker) bindGame(uuid string, before []uint32) uint32 {
+	beforeSet := map[uint32]bool{}
+	for _, p := range before {
+		beforeSet[p] = true
+	}
+	deadline := time.Now().Add(40 * time.Second)
+	for {
+		pids := gameWindowPids()
+		t.mu.Lock()
+		claimed := map[uint32]bool{}
+		for _, r := range t.launched {
+			if r.Pid != 0 {
+				claimed[r.Pid] = true
+			}
+		}
+		var found uint32
+		for _, p := range pids {
+			if !beforeSet[p] && !claimed[p] {
+				found = p
+				break
+			}
+		}
+		if found != 0 {
+			set := false
+			for i := range t.launched {
+				if t.launched[i].UUID == uuid {
+					t.launched[i].Pid = found
+					t.launched[i].At = time.Now()
+					set = true
+					break
+				}
+			}
+			if !set {
+				t.launched = append(t.launched, launchRec{UUID: uuid, At: time.Now(), Pid: found})
+			}
+			t.persist()
+			t.mu.Unlock()
+			return found
+		}
+		t.mu.Unlock()
+		if time.Now().After(deadline) {
+			return 0
+		}
+		time.Sleep(600 * time.Millisecond)
+	}
+}
+
+func (t *GameTracker) bindVerifiedLauncher(uuid string, launcherPID uint32) uint32 {
+	deadline := time.Now().Add(90 * time.Second)
+	for {
+		children := javaDescendantsOf(launcherPID)
+		for _, pid := range gameWindowPids() {
+			if !children[pid] {
+				continue
+			}
+			t.mu.Lock()
+			for i := range t.launched {
+				if t.launched[i].UUID == uuid {
+					t.launched[i].Pid = pid
+					t.launched[i].At = time.Now()
+					t.persist()
+					t.mu.Unlock()
+					return pid
+				}
+			}
+			t.mu.Unlock()
+		}
+		if time.Now().After(deadline) {
+			return 0
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+}
+
 func gameWindowPids() []uint32 {
 	titles := platform.WindowTitlesByPID()
 	javaPids := javaProcessPids()
@@ -166,6 +240,52 @@ func javaProcessPids() map[uint32]bool {
 		}
 		if windows.Process32Next(snapshot, &entry) != nil {
 			break
+		}
+	}
+	return out
+}
+
+func javaDescendantsOf(root uint32) map[uint32]bool {
+	out := map[uint32]bool{}
+	java := javaProcessPids()
+	for pid := range processDescendantsOf(root) {
+		if java[pid] {
+			out[pid] = true
+		}
+	}
+	return out
+}
+
+func processDescendantsOf(root uint32) map[uint32]bool {
+	out := map[uint32]bool{}
+	if root == 0 {
+		return out
+	}
+	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return out
+	}
+	defer windows.CloseHandle(snapshot)
+	parents := map[uint32]uint32{}
+	var entry windows.ProcessEntry32
+	entry.Size = uint32(unsafe.Sizeof(entry))
+	if windows.Process32First(snapshot, &entry) != nil {
+		return out
+	}
+	for {
+		parents[entry.ProcessID] = entry.ParentProcessID
+		if windows.Process32Next(snapshot, &entry) != nil {
+			break
+		}
+	}
+	for pid := range parents {
+		seen := map[uint32]bool{}
+		for cur := pid; cur != 0 && !seen[cur]; cur = parents[cur] {
+			if cur == root {
+				out[pid] = true
+				break
+			}
+			seen[cur] = true
 		}
 	}
 	return out

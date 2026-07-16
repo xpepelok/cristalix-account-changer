@@ -66,6 +66,70 @@ func StartLauncher(exe string) error {
 	return cmd.Start()
 }
 
+func StartLauncherLogged(exe, uuid, name string, store *LogStore, track func(*os.Process), verified func(uint32)) error {
+	if _, err := os.Stat(exe); err != nil {
+		return fmt.Errorf("launcher not found: %w", err)
+	}
+	cmd := exec.Command(exe)
+	cmd.Dir = filepath.Dir(exe)
+	cmd.Env = CleanEnv()
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: CreateNoWindow}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	if track != nil {
+		track(cmd.Process)
+	}
+	if store != nil {
+		store.begin(uuid, name)
+	}
+	matched := make(chan struct{}, 1)
+	handle := func(line string) {
+		if store != nil {
+			store.append(uuid, line)
+		}
+		if launcherLogUserMatches(line, name) {
+			select {
+			case matched <- struct{}{}:
+				if verified != nil {
+					verified(uint32(cmd.Process.Pid))
+				}
+			default:
+			}
+		}
+	}
+	go scanLauncherLines(stdout, handle)
+	go scanLauncherLines(stderr, handle)
+	go func() {
+		_ = cmd.Wait()
+		if track != nil {
+			track(nil)
+		}
+		if store != nil {
+			store.finish(uuid)
+		}
+	}()
+	return nil
+}
+
+func launcherLogUserMatches(line, expected string) bool {
+	const marker = "setting user:"
+	idx := strings.Index(strings.ToLower(line), marker)
+	if idx < 0 {
+		return false
+	}
+	user := strings.TrimSpace(line[idx+len(marker):])
+	return user != "" && strings.EqualFold(user, strings.TrimSpace(expected))
+}
+
 func ResolveJava(cristalix string) string {
 	if p, err := exec.LookPath("java"); err == nil {
 		return p
@@ -142,6 +206,14 @@ func scanLauncher(store *LogStore, uuid string, r io.Reader, bad chan struct{}) 
 			default:
 			}
 		}
+	}
+}
+
+func scanLauncherLines(r io.Reader, handle func(string)) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		handle(sc.Text())
 	}
 }
 

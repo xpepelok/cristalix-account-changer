@@ -148,15 +148,21 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("/api/groups/members", s.handleGroupMembers)
 	mux.HandleFunc("/api/groups/profile", s.handleGroupProfile)
 	mux.HandleFunc("/api/groups/launch", s.handleGroupLaunch)
+	mux.HandleFunc("/api/groups/close-all", s.handleGroupCloseAll)
+	mux.HandleFunc("/api/groups/launch/pause", s.handleGroupLaunchPause)
+	mux.HandleFunc("/api/groups/launch/resume", s.handleGroupLaunchResume)
+	mux.HandleFunc("/api/groups/launch/progress", s.handleGroupLaunchProgress)
 	mux.HandleFunc("/api/settings", s.handleSettings)
 	mux.HandleFunc("/api/settings/autostart", s.handleAutostart)
 	mux.HandleFunc("/api/settings/launcher", s.handleSettingsLauncher)
+	mux.HandleFunc("/api/settings/custom-launcher", s.handleSettingsCustomLauncher)
 	mux.HandleFunc("/api/settings/autoplay", s.handleSettingsAutoPlay)
 	mux.HandleFunc("/api/settings/stats", s.handleSettingsStats)
 	mux.HandleFunc("/api/stats", s.handleStats)
 	mux.HandleFunc("/api/logs", s.handleLogs)
 	mux.HandleFunc("/api/logs/get", s.handleLogsGet)
 	mux.HandleFunc("/api/logs/clear", s.handleLogsClear)
+	mux.HandleFunc("/api/logs/session/delete", s.handleLogSessionDelete)
 	mux.HandleFunc("/api/stop", s.handleStop)
 	mux.HandleFunc("/api/quit", s.handleQuit)
 	mux.HandleFunc("/api/focus", s.handleFocus)
@@ -256,6 +262,8 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) startChosenLauncher() error {
 	switch s.cfg.Launcher() {
+	case config.LauncherCustom:
+		return launcher.StartLauncher(s.cfg.CustomLauncher())
 	case config.LauncherJar:
 		if err := launcher.EnsureLauncherFrom(s.paths.LauncherJar, launcher.JarLauncherURL); err != nil {
 			return err
