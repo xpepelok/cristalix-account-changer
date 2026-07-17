@@ -15,7 +15,8 @@ var procShowWindow = user32Win.NewProc("ShowWindow")
 
 const swRestore = 9
 
-func RunNativeWindow(url, dataPath string, onReady func(focus, quit func())) (ran bool) {
+func RunNativeWindow(url, dataPath string, iconPNG []byte, onReady func(focus, quit func())) (ran bool) {
+	_ = iconPNG
 	defer func() {
 		if recover() != nil {
 			ran = false

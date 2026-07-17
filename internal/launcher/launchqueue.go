@@ -13,6 +13,7 @@ import (
 )
 
 const launchingWindow = 2 * time.Minute
+const gameAppearWindow = 15 * time.Minute
 const tokenConsumeDelay = 6 * time.Second
 const stagingClient = "Minigames-staging-java21"
 
@@ -143,29 +144,54 @@ func (q *LaunchQueue) launchExe(uuid, name, client, exe, url string, before []ui
 		}
 		return false, nil
 	}
+	return true, q.tailGame(uuid, name, client, before, launcherPID)
+}
+
+func (q *LaunchQueue) tailGame(uuid, name, client string, before []uint32, launcherPID uint32) <-chan bool {
 	ready := make(chan bool, 1)
 	go TailGameLog(q.paths.Updates, client, uuid, name, q.logs, func(ok bool) {
 		if ok {
 			go func() {
-				pid := q.tracker.bindVerifiedLauncher(uuid, launcherPID)
-				if pid == 0 {
-					pid = q.tracker.bindGame(uuid, before)
+				if q.tracker.bindVerifiedLauncher(uuid, launcherPID) == 0 {
+					q.tracker.bindGame(uuid, before)
 				}
-				if pid != 0 {
-					q.finishLogWhenGameCloses(uuid)
-				} else if q.logs != nil {
-					q.logs.finish(uuid)
-				}
+				q.finishLogWhenGameCloses(uuid)
 			}()
 		}
 		ready <- ok
 	})
-	return true, ready
+	return ready
+}
+
+func (q *LaunchQueue) launchJar(uuid, name, client string, before []uint32) (bool, <-chan bool) {
+	java := ResolveJava(q.paths.Cristalix)
+	var launcherPID uint32
+	err := StartLauncherJar(java, q.paths.LauncherJar, func() {
+		if EnsureLauncherFrom(q.paths.StaffLauncherExe, StaffLauncherURL) != nil {
+			return
+		}
+		_ = StartLauncherLogged(q.paths.StaffLauncherExe, uuid, name, nil, func(p *os.Process) {
+			q.track(uuid, p)
+		}, nil)
+	}, func(p *os.Process) {
+		q.track(uuid, p)
+		if p != nil {
+			launcherPID = uint32(p.Pid)
+		}
+	})
+	if err != nil {
+		if q.logs != nil {
+			q.logs.unsupported(uuid, name, "[AccountChanger] Не удалось запустить лаунчер: "+err.Error())
+		}
+		return false, nil
+	}
+	return true, q.tailGame(uuid, name, client, before, launcherPID)
 }
 
 func (q *LaunchQueue) finishLogWhenGameCloses(uuid string) {
 	seen := false
 	misses := 0
+	giveUp := time.Now().Add(gameAppearWindow)
 	for {
 		running, _ := q.tracker.Resolve()
 		if running[uuid] != 0 {
@@ -177,6 +203,8 @@ func (q *LaunchQueue) finishLogWhenGameCloses(uuid string) {
 				q.logs.finish(uuid)
 				return
 			}
+		} else if time.Now().After(giveUp) {
+			return
 		}
 		time.Sleep(1 * time.Second)
 	}
@@ -200,12 +228,8 @@ func (q *LaunchQueue) launchFor(uuid, name, client string, before []uint32) (boo
 			ok, ready := q.launchExe(uuid, name, client, q.paths.StaffLauncherExe, StaffLauncherURL, before)
 			return ok, true, ready
 		}
-		java := ResolveJava(q.paths.Cristalix)
-		return StartLauncherJar(java, q.paths.LauncherJar, uuid, name, q.logs, func() {
-			q.launchExe(uuid, name, client, q.paths.StaffLauncherExe, StaffLauncherURL, before)
-		}, func(p *os.Process) {
-			q.track(uuid, p)
-		}) == nil, false, nil
+		ok, ready := q.launchJar(uuid, name, client, before)
+		return ok, true, ready
 	}
 }
 

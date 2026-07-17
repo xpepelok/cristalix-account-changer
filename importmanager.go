@@ -50,6 +50,9 @@ func (s *Server) savedValidLogins() map[string]bool {
 }
 
 func (s *Server) startImport(accounts []credPair) (bool, string) {
+	if !credentialImportSupported {
+		return false, errNoUIAutomation.Error()
+	}
 	s.imp.mu.Lock()
 	if s.imp.running {
 		s.imp.mu.Unlock()
@@ -107,7 +110,6 @@ func (s *Server) startImport(accounts []credPair) (bool, string) {
 }
 
 func (s *Server) runImport(tasks []importTask) {
-
 	defer func() {
 		s.finishImport()
 		s.imp.mu.Lock()

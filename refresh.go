@@ -31,6 +31,9 @@ func (s *Server) expiringAccounts() []*vault.Account {
 }
 
 func (s *Server) startRefreshExpiring() (bool, string) {
+	if !credentialImportSupported {
+		return false, errNoUIAutomation.Error()
+	}
 	s.imp.mu.Lock()
 	if s.imp.running {
 		s.imp.mu.Unlock()

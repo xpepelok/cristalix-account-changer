@@ -62,6 +62,9 @@ func main() {
 
 	vaultStore := vault.OpenVault(paths.Vault)
 	cfg := config.OpenConfig(paths.Config)
+	if !launcherAllowed(cfg.Launcher()) {
+		cfg.SetLauncher(config.LauncherJar)
+	}
 	go stats.Loop(paths, cfg)
 	watcher := &launcher.Watcher{Paths: paths, Vault: vaultStore}
 	tracker := launcher.NewGameTracker(paths.Session)
@@ -89,7 +92,8 @@ func main() {
 		_ = httpServer.Serve(listener)
 	}()
 
-	ran := platform.RunNativeWindow(appURL, paths.WebProfile, func(focus, quit func()) {
+	platform.InstallDesktopEntry(iconBytes)
+	ran := platform.RunNativeWindow(appURL, paths.WebProfile, iconBytes, func(focus, quit func()) {
 		srv.setFocus(focus)
 		srv.restart = quit
 	})

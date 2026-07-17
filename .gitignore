@@ -1,4 +1,7 @@
 /AccountChanger.exe
+/AccountChanger
+/dist/
+/out/
 *.exe
 *.exe~
 *.exe.bak
@@ -13,6 +16,7 @@ buildlog.txt
 /.gocache*/
 /.garble/
 /.gotmp/
+/.gocache-linux/
 
 /.idea/
 

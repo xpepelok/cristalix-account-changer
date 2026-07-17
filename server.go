@@ -115,6 +115,7 @@ func (s *Server) handler() http.Handler {
 		_, _ = w.Write(iconBytes)
 	})
 
+	mux.HandleFunc("/api/caps", s.handleCaps)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/accounts", s.handleAccounts)
 	mux.HandleFunc("/api/launch", s.handleLaunch)
@@ -160,6 +161,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("/api/settings/stats", s.handleSettingsStats)
 	mux.HandleFunc("/api/stats", s.handleStats)
 	mux.HandleFunc("/api/logs", s.handleLogs)
+	mux.HandleFunc("/api/stats/logs", s.handleStatsLogs)
 	mux.HandleFunc("/api/logs/get", s.handleLogsGet)
 	mux.HandleFunc("/api/logs/clear", s.handleLogsClear)
 	mux.HandleFunc("/api/logs/session/delete", s.handleLogSessionDelete)
@@ -269,7 +271,7 @@ func (s *Server) startChosenLauncher() error {
 			return err
 		}
 		java := launcher.ResolveJava(s.paths.Cristalix)
-		return launcher.StartLauncherJar(java, s.paths.LauncherJar, "", "", nil, nil, nil)
+		return launcher.StartLauncherJar(java, s.paths.LauncherJar, nil, nil)
 	case config.LauncherNew:
 		if err := launcher.EnsureLauncherFrom(s.paths.StaffLauncherExe, launcher.StaffLauncherURL); err != nil {
 			return err

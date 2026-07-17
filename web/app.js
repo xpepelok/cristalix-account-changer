@@ -519,16 +519,49 @@ function closeConfirm(value) {
 function clampRam(v) {
   return Math.max(1024, Math.min(32768, Math.round((+v || 1024) / 512) * 512))
 }
+function ramIsAuto(acc) {
+  return !acc || !(acc.ram >= 512)
+}
+function paintModalRamAuto(auto) {
+  document.getElementById('modal-ram-auto').classList.toggle('on', auto)
+  document.getElementById('modal-ram-auto').setAttribute('aria-checked', auto ? 'true' : 'false')
+  document.querySelector('.ram-row').classList.toggle('is-auto', auto)
+}
 function setModalRam(acc) {
   const v = acc && acc.ram >= 512 ? acc.ram : 2048
   document.getElementById('modal-ram-slider').value = v
   document.getElementById('modal-ram-input').value = v
+  paintModalRamAuto(ramIsAuto(acc))
+}
+async function saveModalRamValue(ram) {
+  if (!state.selected) return
+  try {
+    await apiPost('/api/account/ram', { uuids: [state.selected.uuid], ram })
+    state.selected.ram = ram
+    loadAccounts()
+  } catch (e) {
+    toast(e.message, true)
+  }
+}
+async function toggleModalRamAuto() {
+  if (!state.selected) return
+  const auto = !ramIsAuto(state.selected)
+  paintModalRamAuto(auto)
+  if (auto) {
+    await saveModalRamValue(0)
+    return
+  }
+  const ram = clampRam(document.getElementById('modal-ram-input').value)
+  document.getElementById('modal-ram-slider').value = ram
+  document.getElementById('modal-ram-input').value = ram
+  await saveModalRamValue(ram)
 }
 async function saveModalRam(v) {
   if (!state.selected) return
   const ram = clampRam(v)
   document.getElementById('modal-ram-slider').value = ram
   document.getElementById('modal-ram-input').value = ram
+  paintModalRamAuto(false)
   try {
     await apiPost('/api/account/ram', { uuids: [state.selected.uuid], ram })
     state.selected.ram = ram
@@ -1088,6 +1121,7 @@ function render() {
     }
   })
 
+  refreshOpenModal()
   state.firstRender = false
 }
 
@@ -1122,6 +1156,8 @@ function subLabel(key) {
   return key
 }
 
+let lastModalStats = ''
+
 function renderModalStats(acc) {
   const badge = accountBadge(acc)
   const statusColor = badge.cls === 'ready' ? 'green' : badge.cls === 'expired' ? 'yellow' : ''
@@ -1141,13 +1177,20 @@ function renderModalStats(acc) {
     if (info.registeredAt) tiles += statTile(fmtDateTime(info.registeredAt), 'регистрация')
     if (info.lastSeen && info.online !== 'online') tiles += statTile(fmtDateTime(info.lastSeen), 'был онлайн')
   }
-  document.getElementById('modal-stats').innerHTML = tiles
+  const box = document.getElementById('modal-stats')
+  if (lastModalStats === tiles) return
+  lastModalStats = tiles
+  box.innerHTML = tiles
 }
+
+let lastModalGroups = ''
 
 function renderModalGroups(acc) {
   const box = document.getElementById('modal-groups')
   const info = acc.name ? state.playerInfo.get(acc.name.toLowerCase()) : null
   if (!info) {
+    if (lastModalGroups === '') return
+    lastModalGroups = ''
     box.innerHTML = ''
     return
   }
@@ -1158,9 +1201,12 @@ function renderModalGroups(acc) {
   if (info.donate && info.donate !== 'NO') {
     tags.push({ label: info.donate, color: info.donateColor || '#e3a400' })
   }
-  box.innerHTML = tags
+  const html = tags
     .map((t) => `<span class="grp-tag" style="--chip:${t.color}">${esc(t.label)}</span>`)
     .join('')
+  if (lastModalGroups === html) return
+  lastModalGroups = html
+  box.innerHTML = html
 }
 
 function openModal(acc) {
@@ -1179,6 +1225,13 @@ function openModal(acc) {
   renderModalStats(acc)
   if (acc.name) ensurePlayerInfo(acc.name)
 
+  paintModalState(acc)
+
+  overlay.hidden = false
+  mountSkin(acc.uuid)
+}
+
+function paintModalState(acc) {
   const note = document.getElementById('modal-note')
   const launchBtn = document.getElementById('modal-launch')
   if (acc.running) {
@@ -1204,9 +1257,19 @@ function openModal(acc) {
     note.className = 'modal-note'
     note.textContent = ''
   }
+  document.getElementById('modal-pin').classList.toggle('active', !!acc.pinned)
+  document.getElementById('modal-pin').title = acc.pinned ? 'Открепить' : 'Закрепить'
+}
 
-  overlay.hidden = false
-  mountSkin(acc.uuid)
+function refreshOpenModal() {
+  if (!state.selected) return
+  if (overlay.hidden) return
+  const fresh = state.byUuid.get(state.selected.uuid)
+  if (!fresh) return
+  state.selected = fresh
+  paintModalState(fresh)
+  renderModalStats(fresh)
+  renderModalGroups(fresh)
 }
 
 let skinLibPromise = null
@@ -1799,7 +1862,66 @@ function groupDragOver(e) {
   else box.appendChild(dragging)
 }
 
-const logsState = { open: false, uuid: null, session: null, timer: null }
+function formatDurationSecs(secs) {
+  secs = Math.max(0, Math.floor(secs))
+  const h = Math.floor(secs / 3600)
+  const m = Math.floor((secs % 3600) / 60)
+  const s = secs % 60
+  if (h) return h + ' ч ' + String(m).padStart(2, '0') + ' мин'
+  if (m) return m + ' мин ' + String(s).padStart(2, '0') + ' с'
+  return s + ' с'
+}
+
+function personTileHTML(uuid, name, label) {
+  if (!name) return '<div class="stat-tile"><div class="stat-tile-value">—</div><div class="stat-tile-label">' + esc(label) + '</div></div>'
+  const info = state.playerInfo.get(name.toLowerCase())
+  const grp = primaryGroup(info)
+  const chip = grp ? '<span class="grp-chip" style="--chip:' + esc(grp.color) + '">' + esc(grp.label) + '</span>' : ''
+  return (
+    '<div class="stat-tile"><div class="stat-tile-person-row"><span class="avatar-wrap"><span class="avatar mini" style="background-image:' +
+    skinBg(uuid) +
+    '"><span class="avatar-hat" style="background-image:' +
+    skinBg(uuid) +
+    '"></span></span></span>' +
+    chip +
+    '<span class="stat-tile-person-name">' +
+    esc(name) +
+    '</span>' +
+    '</div><div class="stat-tile-label">' +
+    esc(label) +
+    '</div></div>'
+  )
+}
+
+async function openStats() {
+  document.getElementById('stats-overlay').hidden = false
+  const grid = document.getElementById('stats-grid')
+  grid.innerHTML = ''
+  try {
+    const st = await apiGet('/api/stats/logs')
+    if (st.mostLaunchedName) await ensurePlayerInfo(st.mostLaunchedName)
+    if (st.longestName) await ensurePlayerInfo(st.longestName)
+    const tiles = [
+      { html: '<div class="stat-tile"><div class="stat-tile-value">' + esc(String(st.totalAccounts)) + '</div><div class="stat-tile-label">Аккаунтов в логах</div></div>' },
+      { html: '<div class="stat-tile"><div class="stat-tile-value">' + esc(String(st.totalSessions)) + '</div><div class="stat-tile-label">Всего сессий запуска</div></div>' },
+      { html: '<div class="stat-tile"><div class="stat-tile-value' + (st.activeNow ? ' green' : '') + '">' + esc(String(st.activeNow)) + '</div><div class="stat-tile-label">Активно сейчас</div></div>' },
+      { html: '<div class="stat-tile"><div class="stat-tile-value">' + esc(formatDurationSecs(st.avgDuration)) + '</div><div class="stat-tile-label">Среднее время сессии</div></div>' },
+      { html: '<div class="stat-tile"><div class="stat-tile-value">' + esc(formatDurationSecs(st.totalDuration)) + '</div><div class="stat-tile-label">Суммарное время сессий</div></div>' },
+      { html: personTileHTML(st.longestUuid, st.longestName, 'Самая долгая сессия (' + formatDurationSecs(st.longestDuration) + ')') },
+      { html: personTileHTML(st.mostLaunchedUuid, st.mostLaunchedName, 'Чаще всего запускался') },
+      { html: '<div class="stat-tile"><div class="stat-tile-value">' + esc(String(st.totalLines)) + '</div><div class="stat-tile-label">Строк логов записано</div></div>' },
+    ]
+    grid.innerHTML = tiles.map((t) => t.html).join('')
+  } catch (e) {
+    grid.innerHTML = '<div class="stat-tile"><div class="stat-tile-value">—</div><div class="stat-tile-label">Не удалось загрузить</div></div>'
+  }
+}
+
+function closeStats() {
+  document.getElementById('stats-overlay').hidden = true
+}
+
+const logsState = { open: false, uuid: null, session: null, timer: null, tick: null, current: null }
 
 function openLogs() {
   logsState.open = true
@@ -1815,7 +1937,19 @@ function openLogs() {
     if (!logsState.open) return
     refreshLogsSide()
     if (logsState.uuid) refreshLogsView()
-  }, 1500)
+  }, 1000)
+  if (logsState.tick) clearInterval(logsState.tick)
+  logsState.tick = setInterval(tickLogDuration, 250)
+}
+
+function tickLogDuration() {
+  if (!logsState.open) return
+  const session = logsState.current
+  if (!session || !session.active) return
+  const el = document.getElementById('logs-duration')
+  if (!el) return
+  const text = logSessionDuration(session)
+  if (el.textContent !== text) el.textContent = text
 }
 
 function closeLogs() {
@@ -1824,6 +1958,10 @@ function closeLogs() {
   if (logsState.timer) {
     clearInterval(logsState.timer)
     logsState.timer = null
+  }
+  if (logsState.tick) {
+    clearInterval(logsState.tick)
+    logsState.tick = null
   }
 }
 
@@ -1906,7 +2044,7 @@ function logSessionLabel(sessions, session) {
   if (session.active) return 'Текущая'
   const d = new Date(session.started * 1000)
   const key = d.toLocaleDateString('ru-RU')
-  const number = sessions.filter((x) => new Date(x.started * 1000).toLocaleDateString('ru-RU') === key && x.started >= session.started).length
+  const number = sessions.filter((x) => new Date(x.started * 1000).toLocaleDateString('ru-RU') === key && x.started <= session.started).length
   return String(d.getDate()).padStart(2, '0') + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + d.getFullYear() + ' (' + number + ')'
 }
 
@@ -1916,6 +2054,18 @@ function logSessionTime(timestamp) {
   const time = [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':')
   const date = [d.getDate(), d.getMonth() + 1, d.getFullYear()].map((n) => String(n).padStart(2, '0')).join('-')
   return time + ' ' + date
+}
+
+function logSessionDuration(session) {
+  if (!session.started) return '—'
+  const end = session.active ? Date.now() / 1000 : session.ended || session.started
+  let secs = Math.max(0, Math.floor(end - session.started))
+  const h = Math.floor(secs / 3600)
+  secs -= h * 3600
+  const m = Math.floor(secs / 60)
+  secs -= m * 60
+  const parts = h ? [h, m, secs] : [m, secs]
+  return parts.map((n) => String(n).padStart(2, '0')).join(':')
 }
 
 function renderLogSessions(sessions) {
@@ -1954,6 +2104,7 @@ function renderLogSessions(sessions) {
     })
   })
   const current = sessions.find((s) => s.id === logsState.session) || sessions[0]
+  logsState.current = current
   meta.hidden = false
   const endDot = current.active ? 'pending' : 'end'
   const endValue = current.active ? 'Активна' : logSessionTime(current.ended)
@@ -1961,6 +2112,11 @@ function renderLogSessions(sessions) {
     '<div class="logs-session-meta-tile"><div class="logs-session-meta-value"><span class="logs-session-meta-dot start"></span><span class="logs-session-meta-text">' +
     esc(logSessionTime(current.started)) +
     '</span></div><div class="logs-session-meta-label">Начало сессии</div></div>' +
+    '<div class="logs-session-meta-tile"><div class="logs-session-meta-value' +
+    (current.active ? ' pending' : '') +
+    '"><span class="logs-session-meta-dot duration"></span><span class="logs-session-meta-text" id="logs-duration">' +
+    esc(logSessionDuration(current)) +
+    '</span></div><div class="logs-session-meta-label">Длительность сессии</div></div>' +
     '<div class="logs-session-meta-tile"><div class="logs-session-meta-value' +
     (current.active ? ' pending' : '') +
     '"><span class="logs-session-meta-dot ' +
@@ -2908,6 +3064,7 @@ mRamSlider.addEventListener('input', () => {
 mRamSlider.addEventListener('change', () => saveModalRam(mRamSlider.value))
 mRamInput.addEventListener('change', () => saveModalRam(mRamInput.value))
 bindRamSteppers(mRamInput, mRamSlider, saveModalRam)
+document.getElementById('modal-ram-auto').addEventListener('click', toggleModalRamAuto)
 
 const gRamSlider = document.getElementById('ram-modal-slider')
 const gRamInput = document.getElementById('ram-modal-input')
@@ -2973,7 +3130,7 @@ function setLauncherUI(v) {
 function updateCustomPathUI() {
   const el = document.getElementById('custom-launcher-path')
   if (customLauncherPath) {
-    el.textContent = customLauncherPath.split('\\').pop()
+    el.textContent = baseName(customLauncherPath)
     el.title = customLauncherPath
   } else {
     el.textContent = 'Файл не выбран'
@@ -2992,7 +3149,7 @@ async function pickCustomLauncher() {
     customLauncherPath = r.customLauncher || ''
     updateCustomPathUI()
     setLauncherUI(r.launcher)
-    toast('Свой лаунчер: ' + customLauncherPath.split('\\').pop())
+    toast('Свой лаунчер: ' + baseName(customLauncherPath))
   } catch (err) {
     toast(err.message, true)
   }
@@ -3003,6 +3160,60 @@ function toggleLauncherMenu(force) {
   const open = force !== undefined ? force : menu.hidden
   menu.hidden = !open
   dd.classList.toggle('open', open)
+}
+
+let caps = { os: '', credentialImport: true, autoPlay: true, exeLaunchers: true, tray: true }
+
+async function loadCaps() {
+  try {
+    caps = await apiGet('/api/caps')
+  } catch (e) {
+    return
+  }
+  applyCaps()
+}
+
+function applyCaps() {
+  if (!caps.credentialImport) {
+    hideEl('cred-btn')
+    hideEl('refresh-tokens-btn')
+  }
+  if (!caps.autoPlay) {
+    hideRow('toggle-autoplay')
+  }
+  if (!caps.exeLaunchers) {
+    document.querySelectorAll('#launcher-dd-menu .launcher-dd-item').forEach((it) => {
+      if (it.dataset.val === 'normal' || it.dataset.val === 'new') it.hidden = true
+    })
+  }
+  if (!caps.tray) {
+    setText('win-close', 'title', 'Свернуть — приложение продолжит ловить токены в фоне')
+  }
+  if (caps.os && caps.os !== 'windows') {
+    const desc = document.querySelector('#toggle-autostart')?.closest('.setting-row')?.querySelector('.setting-desc')
+    if (desc) desc.textContent = 'Запускать AccountChanger при входе в систему'
+  }
+}
+
+function hideEl(id) {
+  const el = document.getElementById(id)
+  if (el) el.hidden = true
+}
+
+function hideRow(id) {
+  const row = document.getElementById(id)?.closest('.setting-row')
+  if (row) row.hidden = true
+}
+
+function setText(id, attr, value) {
+  const el = document.getElementById(id)
+  if (!el) return
+  el.setAttribute(attr, value)
+  if (attr === 'title') el.setAttribute('aria-label', value)
+}
+
+function baseName(path) {
+  return String(path || '').split(/[\\/]/).pop()
 }
 
 async function openSettings() {
@@ -3064,6 +3275,9 @@ document.addEventListener(
     if (b.id === 'theme-btn') return
     if (b.id === 'bell-btn') return playSound('bell')
     if (b.id === 'settings-btn') return playSound('gear')
+    if (b.id === 'stats-btn') return playSound('stats')
+    if (b.id === 'logs-btn') return playSound('logs')
+    if (b.id === 'profiles-btn') return playSound('profiles')
     if (b.id === 'cred-btn') return playSound('confirm')
     if (b.id === 'refresh-tokens-btn') return playSound('confirm')
     if (b.classList.contains('primary')) return playSound('confirm')
@@ -3165,8 +3379,13 @@ document.querySelectorAll('#launcher-dd-menu .launcher-dd-item').forEach((el) =>
 document.addEventListener('click', () => toggleLauncherMenu(false))
 document.getElementById('logs-btn').addEventListener('click', openLogs)
 document.getElementById('logs-close').addEventListener('click', closeLogs)
+document.getElementById('stats-btn').addEventListener('click', openStats)
+document.getElementById('stats-close').addEventListener('click', closeStats)
 document.getElementById('logs-overlay').addEventListener('click', (e) => {
   if (e.target.id === 'logs-overlay') closeLogs()
+})
+document.getElementById('stats-overlay').addEventListener('click', (e) => {
+  if (e.target.id === 'stats-overlay') closeStats()
 })
 document.getElementById('logs-clear').addEventListener('click', async () => {
   const info = await apiPost('/api/logs/clear?info=1', {})
@@ -3258,6 +3477,7 @@ document.addEventListener('click', (e) => {
   }
 })
 
+loadCaps()
 loadProfiles().then(() => loadGroups())
 loadAccounts()
 checkUpdate()

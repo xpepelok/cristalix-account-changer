@@ -25,7 +25,7 @@ func Resolve() Paths {
 	home, _ := os.UserHomeDir()
 	cristalix := filepath.Join(home, ".cristalix")
 
-	data := filepath.Join(localAppData(), "AccountChanger")
+	data := dataDir()
 
 	return Paths{
 		Cristalix:        cristalix,
@@ -42,14 +42,6 @@ func Resolve() Paths {
 		Config:           filepath.Join(data, "config.json"),
 		Logs:             filepath.Join(data, "logs.json"),
 	}
-}
-
-func localAppData() string {
-	if v := os.Getenv("LOCALAPPDATA"); v != "" {
-		return v
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "AppData", "Local")
 }
 
 func (p Paths) Ensure() error {
