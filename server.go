@@ -90,10 +90,14 @@ func (s *Server) handler() http.Handler {
 	}
 	fileServer := noCache(http.FileServer(http.FS(sub)))
 	mux.Handle("/assets/", fileServer)
-	mux.Handle("/skinview3d.bundle.js", fileServer)
-	mux.Handle("/app.js", fileServer)
-	mux.Handle("/sound.js", fileServer)
-	mux.Handle("/theme.css", fileServer)
+	if entries, err := fs.ReadDir(sub, "."); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || e.Name() == "index.html" {
+				continue
+			}
+			mux.Handle("/"+e.Name(), fileServer)
+		}
+	}
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
