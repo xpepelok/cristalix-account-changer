@@ -3,31 +3,13 @@ package launcher
 import (
 	"accountchanger/internal/vault"
 	"encoding/json"
-	"io"
 	"os"
-	"syscall"
 )
-
-func readFileShareAll(path string) ([]byte, error) {
-	p, err := syscall.UTF16PtrFromString(path)
-	if err != nil {
-		return nil, err
-	}
-	h, err := syscall.CreateFile(p, syscall.GENERIC_READ,
-		syscall.FILE_SHARE_READ|syscall.FILE_SHARE_WRITE|syscall.FILE_SHARE_DELETE,
-		nil, syscall.OPEN_EXISTING, syscall.FILE_ATTRIBUTE_NORMAL, 0)
-	if err != nil {
-		return nil, err
-	}
-	f := os.NewFile(uintptr(h), path)
-	defer f.Close()
-	return io.ReadAll(f)
-}
 
 func ReadLauncherConfig(path string) (map[string]any, error) {
 	raw, err := readFileShareAll(path)
 	if err != nil {
-		if os.IsNotExist(err) || err == syscall.ERROR_FILE_NOT_FOUND || err == syscall.ERROR_PATH_NOT_FOUND {
+		if os.IsNotExist(err) {
 			return map[string]any{}, nil
 		}
 		return nil, err

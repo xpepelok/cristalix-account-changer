@@ -305,6 +305,60 @@ func (s *LogStore) SizeAll() int {
 	}
 	return n
 }
+
+type LogStats struct {
+	TotalAccounts     int    `json:"totalAccounts"`
+	TotalSessions     int    `json:"totalSessions"`
+	ActiveNow         int    `json:"activeNow"`
+	TotalDuration     int64  `json:"totalDuration"`
+	AvgDuration       int64  `json:"avgDuration"`
+	LongestDuration   int64  `json:"longestDuration"`
+	LongestName       string `json:"longestName"`
+	LongestUUID       string `json:"longestUuid"`
+	MostLaunchedName  string `json:"mostLaunchedName"`
+	MostLaunchedUUID  string `json:"mostLaunchedUuid"`
+	MostLaunchedCount int    `json:"mostLaunchedCount"`
+	TotalLines        int    `json:"totalLines"`
+}
+
+func (s *LogStore) Stats() LogStats {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var st LogStats
+	now := time.Now().Unix()
+	st.TotalAccounts = len(s.logs)
+	for _, cl := range s.logs {
+		if len(cl.sessions) > st.MostLaunchedCount {
+			st.MostLaunchedCount = len(cl.sessions)
+			st.MostLaunchedName = cl.name
+			st.MostLaunchedUUID = cl.uuid
+		}
+		for _, x := range cl.sessions {
+			st.TotalSessions++
+			end := x.Ended
+			if x.Active {
+				st.ActiveNow++
+				end = now
+			}
+			dur := end - x.Started
+			if dur < 0 {
+				dur = 0
+			}
+			st.TotalDuration += dur
+			if dur > st.LongestDuration {
+				st.LongestDuration = dur
+				st.LongestName = cl.name
+				st.LongestUUID = cl.uuid
+			}
+			st.TotalLines += len(x.Lines)
+		}
+	}
+	if st.TotalSessions > 0 {
+		st.AvgDuration = st.TotalDuration / int64(st.TotalSessions)
+	}
+	return st
+}
+
 func (s *LogStore) pump(uuid string, r io.Reader) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)

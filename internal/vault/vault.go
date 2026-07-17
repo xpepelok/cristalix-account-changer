@@ -76,7 +76,7 @@ func OpenVault(path string) *Vault {
 	if err != nil {
 		return v
 	}
-	plain, err := platform.DPAPIDecrypt(raw)
+	plain, err := platform.Decrypt(raw)
 	if err != nil {
 		return v
 	}
@@ -98,7 +98,7 @@ func (v *Vault) persist() error {
 	if err != nil {
 		return err
 	}
-	enc, err := platform.DPAPIEncrypt(payload)
+	enc, err := platform.Encrypt(payload)
 	if err != nil {
 		return err
 	}

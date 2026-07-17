@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const AppVersion = "0.3.1"
+const AppVersion = "0.3.2"
 const releaseAPI = "https://api.github.com/repos/xpepelok/cristalix-account-changer/releases/latest"
 
 type UpdateInfo struct {
@@ -157,7 +157,7 @@ func CheckUpdate() *UpdateInfo {
 	info.Name = strings.TrimSpace(rel.Name)
 	info.PublishedAt = rel.PublishedAt
 	for _, a := range rel.Assets {
-		if strings.EqualFold(filepath.Ext(a.Name), ".exe") {
+		if assetMatches(a.Name) {
 			info.assetURL = a.URL
 			break
 		}
@@ -275,6 +275,11 @@ func applyUpdate() error {
 		return err
 	}
 	f.Close()
+
+	if err := finalizeBinary(newPath); err != nil {
+		os.Remove(newPath)
+		return err
+	}
 
 	os.Remove(oldPath)
 	if err := os.Rename(exePath, oldPath); err != nil {

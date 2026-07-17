@@ -4,7 +4,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 const uiaLoginScript = `
@@ -180,7 +179,7 @@ func UiaLogin(login, password string, timeoutSec int) (int, string) {
 	script := strings.Replace(uiaLoginScript, "{{TIMEOUT}}", strconv.Itoa(timeoutSec), 1)
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowershell(script))
 	cmd.Env = append(CleanEnv(), "AC_IMPORT_LOGIN="+login, "AC_IMPORT_PASS="+password)
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: CreateNoWindow}
+	detach(cmd)
 	out, err := cmd.CombinedOutput()
 	msg := strings.TrimSpace(string(out))
 	if err != nil {

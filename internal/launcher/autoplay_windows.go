@@ -5,7 +5,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
 	"unicode/utf16"
 )
 
@@ -48,7 +47,7 @@ func clickPlayButton(timeoutSec int) {
 	script := strings.Replace(autoPlayScript, "{{TIMEOUT}}", strconv.Itoa(timeoutSec), 1)
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowershell(script))
 	cmd.Env = CleanEnv()
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: CreateNoWindow}
+	detach(cmd)
 	_ = cmd.Run()
 }
 
@@ -85,6 +84,6 @@ func ClickPlayButtonForPid(pid, timeoutSec int) {
 	script = strings.Replace(script, "{{PID}}", strconv.Itoa(pid), 1)
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowershell(script))
 	cmd.Env = CleanEnv()
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: CreateNoWindow}
+	detach(cmd)
 	_ = cmd.Run()
 }

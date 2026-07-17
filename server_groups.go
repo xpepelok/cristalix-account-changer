@@ -301,6 +301,10 @@ func (s *Server) handleSettingsLauncher(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
+	if !launcherAllowed(body.Launcher) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "этот лаунчер - Windows-программа, на Linux используй jar или свой"})
+		return
+	}
 	if !s.cfg.SetLauncher(body.Launcher) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "неизвестный лаунчер"})
 		return
@@ -329,6 +333,10 @@ func (s *Server) handleAutostart(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"logs": s.logs.Summaries()})
+}
+
+func (s *Server) handleStatsLogs(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.logs.Stats())
 }
 
 func (s *Server) handleLogsGet(w http.ResponseWriter, r *http.Request) {

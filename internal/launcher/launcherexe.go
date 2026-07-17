@@ -9,11 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
-
-const CreateNoWindow = 0x08000000
 
 const launcherDownloadURL = "https://cristalix.gg/content/launcher/Cristalix.exe"
 const JarLauncherURL = "https://cristalix.gg/content/launcher/Cristalix.jar"
@@ -62,7 +59,7 @@ func StartLauncher(exe string) error {
 	cmd := exec.Command(exe)
 	cmd.Dir = filepath.Dir(exe)
 	cmd.Env = CleanEnv()
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: CreateNoWindow}
+	detach(cmd)
 	return cmd.Start()
 }
 
@@ -73,7 +70,7 @@ func StartLauncherLogged(exe, uuid, name string, store *LogStore, track func(*os
 	cmd := exec.Command(exe)
 	cmd.Dir = filepath.Dir(exe)
 	cmd.Env = CleanEnv()
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: CreateNoWindow}
+	detach(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -134,10 +131,7 @@ func ResolveJava(cristalix string) string {
 	if p, err := exec.LookPath("java"); err == nil {
 		return p
 	}
-	candidates := []string{
-		filepath.Join(cristalix, "runtime", "bin", "java.exe"),
-	}
-	for _, c := range candidates {
+	for _, c := range javaCandidates(cristalix) {
 		if _, err := os.Stat(c); err == nil {
 			return c
 		}
@@ -145,15 +139,15 @@ func ResolveJava(cristalix string) string {
 	return "java"
 }
 
-func StartLauncherJar(java, launcher, uuid, name string, store *LogStore, onInvalid func(), track func(*os.Process)) error {
+func StartLauncherJar(java, launcher string, onInvalid func(), track func(*os.Process)) error {
 	if _, err := os.Stat(launcher); err != nil {
 		return fmt.Errorf("launcher not found: %w", err)
 	}
 	cmd := exec.Command(java, "-jar", launcher)
 	cmd.Dir = filepath.Dir(launcher)
 	cmd.Env = CleanEnv()
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: CreateNoWindow}
-	if store == nil {
+	detach(cmd)
+	if onInvalid == nil && track == nil {
 		return cmd.Start()
 	}
 	stdout, err := cmd.StdoutPipe()
@@ -170,15 +164,13 @@ func StartLauncherJar(java, launcher, uuid, name string, store *LogStore, onInva
 	if track != nil {
 		track(cmd.Process)
 	}
-	store.begin(uuid, name)
 	bad := make(chan struct{}, 1)
-	go scanLauncher(store, uuid, stdout, bad)
-	go scanLauncher(store, uuid, stderr, bad)
+	go scanJarBroken(stdout, bad)
+	go scanJarBroken(stderr, bad)
 	go func() {
 		select {
 		case <-bad:
 			_ = cmd.Process.Kill()
-			store.unsupported(uuid, name, "Новый лаунчер не поддерживает чтение логов")
 			if onInvalid != nil {
 				onInvalid()
 			}
@@ -188,23 +180,21 @@ func StartLauncherJar(java, launcher, uuid, name string, store *LogStore, onInva
 		if track != nil {
 			track(nil)
 		}
-		store.finish(uuid)
 	}()
 	return nil
 }
 
-func scanLauncher(store *LogStore, uuid string, r io.Reader, bad chan struct{}) {
+func scanJarBroken(r io.Reader, bad chan struct{}) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
-		line := sc.Text()
-		store.append(uuid, line)
-		low := strings.ToLower(line)
+		low := strings.ToLower(sc.Text())
 		if strings.Contains(low, "invalid or corrupt jarfile") || strings.Contains(low, "unable to access jarfile") {
 			select {
 			case bad <- struct{}{}:
 			default:
 			}
+			return
 		}
 	}
 }

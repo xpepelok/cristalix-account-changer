@@ -32,7 +32,9 @@ func (b dataBlob) bytes() []byte {
 
 const cryptUIForbidden = 0x1
 
-func DPAPIEncrypt(plain []byte) ([]byte, error) {
+func resetSecretCache() {}
+
+func Encrypt(plain []byte) ([]byte, error) {
 	in := newBlob(plain)
 	var out dataBlob
 	ret, _, err := procProtectData.Call(
@@ -48,7 +50,7 @@ func DPAPIEncrypt(plain []byte) ([]byte, error) {
 	return out.bytes(), nil
 }
 
-func DPAPIDecrypt(enc []byte) ([]byte, error) {
+func Decrypt(enc []byte) ([]byte, error) {
 	in := newBlob(enc)
 	var out dataBlob
 	ret, _, err := procUnprotect.Call(
