@@ -13,8 +13,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Если тег уйдёт вперёд AppVersion — обновлённый клиент снова отрапортует старую
-      # версию, увидит тот же релиз новее себя и будет обновляться по кругу, бесконечно.
       - name: Тег должен совпадать с AppVersion
         run: |
           tag="${GITHUB_REF_NAME#AccountChanger-}"
@@ -55,9 +53,6 @@ jobs:
   linux:
     needs: guard
     runs-on: ubuntu-latest
-    # Тот же образ, что и Dockerfile.linux-build: glibc 2.36. Сборка на голом
-    # ubuntu-24.04 (glibc 2.39) выдаст бинарник, который не стартует у тех, кто на
-    # Debian 12 / Ubuntu 22.04 — причём уже ПОСЛЕ того, как апдейтер затрёт рабочий.
     container: golang:1.25-bookworm
     env:
       GOTOOLCHAIN: local
@@ -93,8 +88,6 @@ jobs:
           path: dist
           merge-multiple: true
 
-      # Имена перечислены явно. Апдейтер на Linux берёт ЛЮБОЙ файл со словом "linux"
-      # в имени и пишет его поверх бинарника — sha256sum * создал бы такой файл.
       - name: Контрольные суммы
         working-directory: dist
         run: sha256sum AccountChanger.exe AccountChanger-linux-x86_64 > checksums.txt

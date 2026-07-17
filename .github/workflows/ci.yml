@@ -26,8 +26,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # -unsafeptr=false: clipboard_windows.go и tray_windows.go передают uintptr
-      # из Win32 (GlobalLock, LPARAM) — память не под управлением GC, это ложные срабатывания.
       - name: Vet
         run: go vet -unsafeptr=false ./...
 
