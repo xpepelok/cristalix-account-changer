@@ -1,6 +1,7 @@
 package main
 
 import (
+	"accountchanger/internal/app"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -8,9 +9,12 @@ import (
 	"testing"
 )
 
+func testHandler() http.Handler {
+	return app.New(app.Deps{Web: webFiles, Icon: iconBytes}).Handler()
+}
+
 func TestEmbeddedWebFilesAreServed(t *testing.T) {
-	s := &Server{}
-	h := s.handler()
+	h := testHandler()
 
 	sub, err := fs.Sub(webFiles, "web")
 	if err != nil {
@@ -53,8 +57,7 @@ func TestIndexReferencesExistOnDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := &Server{}
-	h := s.handler()
+	h := testHandler()
 
 	var checked int
 	for _, part := range strings.Split(string(index), `src="`)[1:] {
@@ -82,5 +85,16 @@ func TestNoStaleAppJS(t *testing.T) {
 	}
 	if _, err := fs.Stat(sub, "app.js"); err == nil {
 		t.Error("web/app.js всё ещё встроен в бинарник")
+	}
+}
+
+func TestFaviconServed(t *testing.T) {
+	rec := httptest.NewRecorder()
+	testHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/favicon.png", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/favicon.png: код %d", rec.Code)
+	}
+	if rec.Body.Len() == 0 {
+		t.Error("/favicon.png пустой — иконка не встроилась")
 	}
 }

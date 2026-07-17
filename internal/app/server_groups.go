@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"accountchanger/internal/launcher"
@@ -301,7 +301,7 @@ func (s *Server) handleSettingsLauncher(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	if !launcherAllowed(body.Launcher) {
+	if !LauncherAllowed(body.Launcher) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "этот лаунчер - Windows-программа, на Linux используй jar или свой"})
 		return
 	}

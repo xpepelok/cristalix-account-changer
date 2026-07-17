@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"accountchanger/internal/config"
@@ -31,7 +31,7 @@ func (s *Server) handleCaps(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, caps())
 }
 
-func launcherAllowed(v string) bool {
+func LauncherAllowed(v string) bool {
 	if exeLaunchersSupported {
 		return true
 	}

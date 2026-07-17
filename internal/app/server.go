@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"accountchanger/internal/config"
@@ -19,11 +19,17 @@ import (
 	"time"
 )
 
-//go:embed web
-var webFiles embed.FS
-
-//go:embed assets/icon.png
-var iconBytes []byte
+type Deps struct {
+	Paths   platform.Paths
+	Vault   *vault.Vault
+	Watcher *launcher.Watcher
+	Queue   *launcher.LaunchQueue
+	Tracker *launcher.GameTracker
+	Logs    *launcher.LogStore
+	Cfg     *config.ConfigStore
+	Web     embed.FS
+	Icon    []byte
+}
 
 type Server struct {
 	paths   platform.Paths
@@ -33,6 +39,8 @@ type Server struct {
 	tracker *launcher.GameTracker
 	logs    *launcher.LogStore
 	cfg     *config.ConfigStore
+	web     embed.FS
+	icon    []byte
 	quit    chan struct{}
 	restart func()
 	focusMu sync.Mutex
@@ -43,10 +51,37 @@ type Server struct {
 	imp        importJob
 }
 
-func (s *Server) setFocus(f func()) {
+func New(d Deps) *Server {
+	return &Server{
+		paths:   d.Paths,
+		vault:   d.Vault,
+		watcher: d.Watcher,
+		queue:   d.Queue,
+		tracker: d.Tracker,
+		logs:    d.Logs,
+		cfg:     d.Cfg,
+		web:     d.Web,
+		icon:    d.Icon,
+		quit:    make(chan struct{}),
+	}
+}
+
+func (s *Server) SetFocus(f func()) {
 	s.focusMu.Lock()
 	s.focus = f
 	s.focusMu.Unlock()
+}
+
+func (s *Server) SetRestart(f func()) {
+	s.restart = f
+}
+
+func (s *Server) Quit() {
+	close(s.quit)
+}
+
+func (s *Server) Wait() {
+	<-s.quit
 }
 
 type accountDTO struct {
@@ -75,10 +110,10 @@ type accountDTO struct {
 	FirstSeen      int64  `json:"firstSeen"`
 }
 
-func (s *Server) handler() http.Handler {
+func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	sub, _ := fs.Sub(webFiles, "web")
+	sub, _ := fs.Sub(s.web, "web")
 
 	noCache := func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -104,7 +139,7 @@ func (s *Server) handler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		data, err := webFiles.ReadFile("web/index.html")
+		data, err := s.web.ReadFile("web/index.html")
 		if err != nil {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
@@ -116,7 +151,7 @@ func (s *Server) handler() http.Handler {
 
 	mux.HandleFunc("/favicon.png", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		_, _ = w.Write(iconBytes)
+		_, _ = w.Write(s.icon)
 	})
 
 	mux.HandleFunc("/api/caps", s.handleCaps)

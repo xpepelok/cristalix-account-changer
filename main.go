@@ -1,12 +1,14 @@
 package main
 
 import (
+	"accountchanger/internal/app"
 	"accountchanger/internal/config"
 	"accountchanger/internal/launcher"
 	"accountchanger/internal/platform"
 	"accountchanger/internal/stats"
 	"accountchanger/internal/update"
 	"accountchanger/internal/vault"
+	"embed"
 	"net"
 	"net/http"
 	"os"
@@ -14,6 +16,12 @@ import (
 	"runtime/debug"
 	"time"
 )
+
+//go:embed web
+var webFiles embed.FS
+
+//go:embed assets/icon.png
+var iconBytes []byte
 
 const listenAddr = "127.0.0.1:47821"
 const appURL = "http://127.0.0.1:47821/"
@@ -62,7 +70,7 @@ func main() {
 
 	vaultStore := vault.OpenVault(paths.Vault)
 	cfg := config.OpenConfig(paths.Config)
-	if !launcherAllowed(cfg.Launcher()) {
+	if !app.LauncherAllowed(cfg.Launcher()) {
 		cfg.SetLauncher(config.LauncherJar)
 	}
 	go stats.Loop(paths, cfg)
@@ -76,31 +84,32 @@ func main() {
 	}()
 	go watcher.Run()
 
-	srv := &Server{
-		paths:   paths,
-		vault:   vaultStore,
-		watcher: watcher,
-		tracker: tracker,
-		queue:   launcher.NewLaunchQueue(paths, vaultStore, tracker, logs, cfg),
-		logs:    logs,
-		cfg:     cfg,
-		quit:    make(chan struct{}),
-	}
+	srv := app.New(app.Deps{
+		Paths:   paths,
+		Vault:   vaultStore,
+		Watcher: watcher,
+		Tracker: tracker,
+		Queue:   launcher.NewLaunchQueue(paths, vaultStore, tracker, logs, cfg),
+		Logs:    logs,
+		Cfg:     cfg,
+		Web:     webFiles,
+		Icon:    iconBytes,
+	})
 
-	httpServer := &http.Server{Handler: srv.handler()}
+	httpServer := &http.Server{Handler: srv.Handler()}
 	go func() {
 		_ = httpServer.Serve(listener)
 	}()
 
 	platform.InstallDesktopEntry(iconBytes)
 	ran := platform.RunNativeWindow(appURL, paths.WebProfile, iconBytes, func(focus, quit func()) {
-		srv.setFocus(focus)
-		srv.restart = quit
+		srv.SetFocus(focus)
+		srv.SetRestart(quit)
 	})
 	if !ran {
-		srv.restart = func() { close(srv.quit) }
+		srv.SetRestart(srv.Quit)
 		platform.OpenBrowser(appURL, paths.WebProfile)
-		<-srv.quit
+		srv.Wait()
 	}
 	logs.Flush()
 }

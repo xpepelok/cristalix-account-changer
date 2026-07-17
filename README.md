@@ -6,8 +6,13 @@
 ![Просмотры](https://visitor-badge.laobi.icu/badge?page_id=xpepelok.cristalix-account-changer&left_text=%D0%BF%D1%80%D0%BE%D1%81%D0%BC%D0%BE%D1%82%D1%80%D1%8B&left_color=64748b&right_color=3b82e8)
 ![Сейчас онлайн](https://img.shields.io/badge/dynamic/json?url=https://stats.xpepelok.me/stats&query=%24.online&label=%D1%81%D0%B5%D0%B9%D1%87%D0%B0%D1%81%20%D0%BE%D0%BD%D0%BB%D0%B0%D0%B9%D0%BD&color=3b82e8&labelColor=64748b)
 ![Всего пользователей](https://img.shields.io/endpoint?url=https://stats.xpepelok.me/total&labelColor=64748b)
+[![Лицензия](https://img.shields.io/github/license/xpepelok/cristalix-account-changer?color=3b82e8&label=%D0%BB%D0%B8%D1%86%D0%B5%D0%BD%D0%B7%D0%B8%D1%8F&labelColor=64748b)](LICENSE)
 
 Менеджер аккаунтов Cristalix. Пока приложение открыто, оно ловит токены аккаунтов, под которыми ты заходишь через лаунчер, и хранит их зашифрованными. Дальше переключаешься между ними в один клик.
+
+<p align="center">
+  <img src="docs/screenshot.png" alt="Главный экран AccountChanger" width="900">
+</p>
 
 ## Возможности
 
@@ -72,11 +77,13 @@ sudo pacman -S jre-openjdk gtk3 webkit2gtk-4.1
 
 ## Использование
 
-Запусти `AccountChanger.exe` (или `./AccountChanger` на Linux) - откроется окно приложения. Закрытие сворачивает приложение (в трей на Windows, в панель задач на Linux), оно продолжает ловить токены в фоне. Полностью закрыть - кнопкой «Закрыть», на Windows ещё и через меню иконки в трее.
+Запусти `AccountChanger.exe` - откроется окно приложения. На Linux скачанному файлу сначала нужно разрешить запуск (`chmod +x AccountChanger-linux-x86_64`), дальше `./AccountChanger-linux-x86_64`; обновлениям это уже не нужно, приложение проставляет права само. Закрытие сворачивает приложение (в трей на Windows, в панель задач на Linux), оно продолжает ловить токены в фоне. Полностью закрыть - кнопкой «Закрыть», на Windows ещё и через меню иконки в трее.
 
 ## Сборка
 
-Нужен Go 1.25+.
+Релизы собираются сами: пушишь тег вида `AccountChanger-0.3.3` - GitHub Actions собирает Windows и Linux и выкладывает релиз. Перед этим подними `AppVersion` в `internal/update/updater.go` до той же версии, иначе сборка остановится: если тег уйдёт вперёд версии в коде, обновлённое приложение снова отрапортует старую версию и будет обновляться по кругу.
+
+Собрать руками тоже можно. Нужен Go 1.25+.
 
 ### Windows
 
@@ -115,3 +122,7 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o Acc
 docker run --rm -v "%CD%:/src" -w /src golang:1.25-bookworm bash -c "\
   apt-get update -qq && apt-get install -y -qq pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev && ./build.sh"
 ```
+
+## Лицензия
+
+[MIT](LICENSE) - делай что хочешь, но копирайт оставь. Автор ни за что не отвечает.
