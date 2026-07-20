@@ -23,6 +23,17 @@ func (s *Server) ensureImportLauncher(prepare func(), forceFresh bool) error {
 	return errNoUIAutomation
 }
 
+func (s *Server) importAll(tasks []importTask) {
+	for i := range tasks {
+		if s.importCanceled() {
+			s.markRestCanceled()
+			return
+		}
+		s.setItem(tasks[i].item, "err", errNoUIAutomation.Error(), "")
+		tasks[i].password = ""
+	}
+}
+
 func (s *Server) importByCredentials(login, password string) (string, error) {
 	return "", errNoUIAutomation
 }

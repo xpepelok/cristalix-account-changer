@@ -18,6 +18,9 @@ func gameWindowPids() []uint32 {
 		if !javaPids[pid] {
 			continue
 		}
+		if isLauncherPid(pid) {
+			continue
+		}
 		for _, title := range titles[pid] {
 			low := strings.ToLower(strings.TrimSpace(title))
 			if low == "cristalix" || strings.HasPrefix(low, "cristalix ") {
@@ -49,6 +52,16 @@ func javaProcessPids() map[uint32]bool {
 		}
 		if windows.Process32Next(snapshot, &entry) != nil {
 			break
+		}
+	}
+	return out
+}
+
+func ProcessTreePids(root uint32) []uint32 {
+	out := []uint32{root}
+	for pid := range processDescendantsOf(root) {
+		if pid != root {
+			out = append(out, pid)
 		}
 	}
 	return out

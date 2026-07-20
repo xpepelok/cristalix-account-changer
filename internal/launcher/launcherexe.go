@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"archive/zip"
 	"bufio"
 	"fmt"
 	"io"
@@ -20,9 +21,26 @@ func EnsureLauncher(dest string) error {
 	return EnsureLauncherFrom(dest, launcherDownloadURL)
 }
 
+func jarIsValid(path string) bool {
+	r, err := zip.OpenReader(path)
+	if err != nil {
+		return false
+	}
+	defer r.Close()
+	for _, f := range r.File {
+		if f.Name == "META-INF/MANIFEST.MF" {
+			return true
+		}
+	}
+	return false
+}
+
 func EnsureLauncherFrom(dest, downloadURL string) error {
 	if info, err := os.Stat(dest); err == nil && info.Size() > 0 {
-		return nil
+		if !strings.HasSuffix(dest, ".jar") || jarIsValid(dest) {
+			return nil
+		}
+		_ = os.Remove(dest)
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
@@ -63,13 +81,18 @@ func StartLauncher(exe string) error {
 	return cmd.Start()
 }
 
-func StartLauncherLogged(exe, uuid, name string, store *LogStore, track func(*os.Process), verified func(uint32)) error {
+func StartLauncherLogged(exe, home, uuid, name string, store *LogStore, track func(*os.Process), verified func(uint32)) error {
 	if _, err := os.Stat(exe); err != nil {
 		return fmt.Errorf("launcher not found: %w", err)
 	}
 	cmd := exec.Command(exe)
 	cmd.Dir = filepath.Dir(exe)
-	cmd.Env = CleanEnv()
+	env := CleanEnv()
+	if home != "" {
+		env = withEnv(env, "USERPROFILE", home)
+		env = withEnv(env, "APPDATA", home)
+	}
+	cmd.Env = env
 	detach(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -128,24 +151,64 @@ func launcherLogUserMatches(line, expected string) bool {
 }
 
 func ResolveJava(cristalix string) string {
-	if p, err := exec.LookPath("java"); err == nil {
-		return p
-	}
-	for _, c := range javaCandidates(cristalix) {
-		if _, err := os.Stat(c); err == nil {
-			return c
-		}
-	}
-	return "java"
+
+	java, _ := UsableJava(cristalix)
+	return java
 }
 
-func StartLauncherJar(java, launcher string, onInvalid func(), track func(*os.Process)) error {
+func UsableJava(cristalix string) (java string, ok bool) {
+	for _, c := range javaCandidates(cristalix) {
+		if _, err := os.Stat(c); err != nil {
+			continue
+		}
+		if javaMajor(c) < 11 {
+			continue
+		}
+		return c, true
+	}
+	return "java", false
+}
+
+func javaMajor(javaPath string) int {
+	cmd := exec.Command(javaPath, "-version")
+	detach(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0
+	}
+	return parseJavaMajor(string(out))
+}
+
+func parseJavaMajor(s string) int {
+	i := strings.Index(s, "version \"")
+	if i < 0 {
+		return 0
+	}
+	v := s[i+len("version \""):]
+	if j := strings.IndexByte(v, '"'); j >= 0 {
+		v = v[:j]
+	}
+	v = strings.TrimPrefix(v, "1.")
+	n := 0
+	for k := 0; k < len(v) && v[k] >= '0' && v[k] <= '9'; k++ {
+		n = n*10 + int(v[k]-'0')
+	}
+	return n
+}
+
+func StartLauncherJar(java, launcher, home string, onInvalid func(), track func(*os.Process)) error {
 	if _, err := os.Stat(launcher); err != nil {
 		return fmt.Errorf("launcher not found: %w", err)
 	}
-	cmd := exec.Command(java, "-jar", launcher)
+	args := []string{"-jar", launcher}
+	env := CleanEnv()
+	if home != "" {
+		args = append([]string{"-Duser.home=" + home}, args...)
+		env = withEnv(env, "APPDATA", home)
+	}
+	cmd := exec.Command(java, args...)
 	cmd.Dir = filepath.Dir(launcher)
-	cmd.Env = CleanEnv()
+	cmd.Env = env
 	detach(cmd)
 	if onInvalid == nil && track == nil {
 		return cmd.Start()
@@ -209,4 +272,16 @@ func scanLauncherLines(r io.Reader, handle func(string)) {
 
 func CleanEnv() []string {
 	return os.Environ()
+}
+
+func withEnv(base []string, key, val string) []string {
+	prefix := strings.ToUpper(key) + "="
+	out := make([]string, 0, len(base)+1)
+	for _, e := range base {
+		if strings.HasPrefix(strings.ToUpper(e), prefix) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return append(out, key+"="+val)
 }

@@ -18,8 +18,8 @@ func SanitizeProfileName(name string) string {
 		}
 		return r
 	}, name)
-	if len(name) > 40 {
-		name = name[:40]
+	if r := []rune(name); len(r) > 40 {
+		name = string(r[:40])
 	}
 	return strings.TrimSpace(name)
 }

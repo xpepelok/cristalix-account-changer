@@ -216,11 +216,15 @@ function renderLsClient() {
     return '<div class="ls-seg" data-key="' + key + '"><div class="ls-seg-thumb"></div>' + opt(0, 'Не менять') + opt(1, 'Выкл') + opt(2, 'Вкл') + '</div>'
   }
   box.innerHTML =
+    '<div class="ls-client-row"><span class="ls-toggle-label">Минимальные настройки</span>' +
+    '<button class="toggle' + (state.lsMinimal ? ' on' : '') + '" id="ls-minimal" role="switch"><span class="toggle-knob"></span></button></div>' +
+    '<div class="ls-lockable" id="ls-lockable">' +
     '<div class="ls-client-row"><span class="ls-toggle-label">Прогрузка чанков</span>' +
     '<input type="number" class="ram-input ls-num" id="ls-chunks" min="2" max="32" step="1" value="' + (state.lsClient.renderDistance || '') + '"></div>' +
     '<div class="ls-client-row"><span class="ls-toggle-label">Макс. FPS</span>' +
     '<input type="number" class="ram-input ls-num" id="ls-fps" min="5" max="260" step="5" value="' + (state.lsClient.maxFps || '') + '"></div>' +
-    LS_TRISTATE.map((t) => '<div class="ls-client-row"><span class="ls-toggle-label">' + t.label + '</span>' + seg(t.key) + '</div>').join('')
+    LS_TRISTATE.map((t) => '<div class="ls-client-row"><span class="ls-toggle-label">' + t.label + '</span>' + seg(t.key) + '</div>').join('') +
+    '</div>'
   document.getElementById('ls-chunks').addEventListener('change', (e) => {
     const raw = +e.target.value || 0
     const v = raw > 0 ? Math.max(2, Math.min(32, raw)) : 0
@@ -249,11 +253,27 @@ function renderLsClient() {
       })
     })
   })
+  const lockable = document.getElementById('ls-lockable')
+  const applyLock = () => lockable.classList.toggle('ls-locked', state.lsMinimal)
+  applyLock()
+  document.getElementById('ls-minimal').addEventListener('click', () => {
+    state.lsMinimal = !state.lsMinimal
+    document.getElementById('ls-minimal').classList.toggle('on', state.lsMinimal)
+    applyLock()
+    if (state.lsMinimal) {
+      const ramInput = document.getElementById('ram-modal-input')
+      const ramSlider = document.getElementById('ram-modal-slider')
+      ramInput.value = 1024
+      ramSlider.value = 1024
+      ramInput.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+  })
 }
 
-function buildEditor(name, content) {
+function buildEditor(name, content, readonly) {
   const kvFiles = ['options.txt', 'optionsof.txt']
   const jsonFiles = ['binds.json', 'voicechat.json']
+  const ro = readonly ? ' disabled' : ''
   state.editorFiles = {}
   let html = `<div class="editor-scroll"><div class="editor-head"><div class="editor-name">${esc(name)}</div></div>`
   for (const f of kvFiles) {
@@ -263,7 +283,7 @@ function buildEditor(name, content) {
     const rows = lines
       .map((l, idx) =>
         l.kv
-          ? `<div class="kv-row"><span class="kv-key" title="${esc(l.k)}">${esc(l.k)}</span><input class="kv-val" data-idx="${idx}" value="${esc(l.v)}" /></div>`
+          ? `<div class="kv-row"><span class="kv-key" title="${esc(l.k)}">${esc(l.k)}</span><input class="kv-val" data-idx="${idx}" value="${esc(l.v)}"${ro} /></div>`
           : '',
       )
       .join('')
@@ -271,10 +291,12 @@ function buildEditor(name, content) {
     html += `</div></div>`
   }
   for (const f of jsonFiles) {
-    html += `<div class="editor-file" data-file="${f}"><div class="editor-file-title">${f}</div><textarea class="json-area" data-file="${f}" spellcheck="false">${esc(prettyJson(content[f] || ''))}</textarea></div>`
+    html += `<div class="editor-file" data-file="${f}"><div class="editor-file-title">${f}</div><textarea class="json-area" data-file="${f}" spellcheck="false"${readonly ? ' readonly' : ''}>${esc(prettyJson(content[f] || ''))}</textarea></div>`
   }
   html += `</div>`
-  html += `<div class="editor-actions"><button class="action-btn primary" id="editor-save">Сохранить профиль</button><button class="action-btn danger-ghost" id="editor-delete">Удалить</button></div>`
+  html += readonly
+    ? `<div class="editor-actions"><span class="editor-empty">Встроенный профиль — только для чтения</span></div>`
+    : `<div class="editor-actions"><button class="action-btn primary" id="editor-save">Сохранить профиль</button><button class="action-btn danger-ghost" id="editor-delete">Удалить</button></div>`
   return html
 }
 

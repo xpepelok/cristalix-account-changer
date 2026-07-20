@@ -65,6 +65,7 @@ function openRamModal() {
   state.ramPick = new Set(state.ramMembers.map((m) => m.uuid))
   state.lsSettings = { minGraphics: false, fullscreen: false, discordRPC: false, autoEnter: false, debugMode: false }
   state.lsClient = { renderDistance: 0, maxFps: 0, animations: 0, fastRender: 0 }
+  state.lsMinimal = false
   document.getElementById('ram-modal-slider').value = 2048
   document.getElementById('ram-modal-input').value = 2048
   renderLsToggles()

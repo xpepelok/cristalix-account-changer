@@ -42,17 +42,25 @@ public static class Win {
 $login = $env:AC_IMPORT_LOGIN
 $password = $env:AC_IMPORT_PASS
 $deadline = [DateTime]::UtcNow.AddSeconds({{TIMEOUT}})
+$loginLabels = @('Вход','Sign in','Sign In','Login','Log in','Log In')
 $loginEl = $null; $passEl = $null; $btn = $null; $hwnd = [IntPtr]::Zero
 while ([DateTime]::UtcNow -lt $deadline -and ($null -eq $btn)) {
-  Start-Sleep -Milliseconds 400
+  Start-Sleep -Milliseconds 200
   foreach ($p in Get-Process -ErrorAction SilentlyContinue) {
     if ($p.MainWindowHandle -eq [IntPtr]::Zero) { continue }
     try {
       $r = [Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
       if ($r.Current.Name -ne 'Cristalix') { continue }
-      $bcond = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, 'Вход')
-      $b = $r.FindFirst([Windows.Automation.TreeScope]::Descendants, $bcond)
-      if ($null -eq $b -or $b.Current.ControlType -ne [Windows.Automation.ControlType]::Button) { continue }
+      $btnCond = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Button)
+      $allBtns = $r.FindAll([Windows.Automation.TreeScope]::Descendants, $btnCond)
+      $b = $null
+      for ($bi = 0; $bi -lt $allBtns.Count; $bi++) {
+        $cand = $allBtns.Item($bi)
+        $cn = $cand.Current.Name
+        foreach ($ll in $loginLabels) { if ($cn -eq $ll) { $b = $cand; break } }
+        if ($null -ne $b) { break }
+      }
+      if ($null -eq $b) { continue }
       $editCond = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Edit)
       $edits = $r.FindAll([Windows.Automation.TreeScope]::Descendants, $editCond)
       $list = @()
@@ -76,6 +84,9 @@ while ([DateTime]::UtcNow -lt $deadline -and ($null -eq $btn)) {
   }
 }
 if ($null -eq $btn) { Write-Output "login: form NOT found (no Cristalix window with Вход button + 2 edits)"; exit 1 }
+$winpid = [uint32]0
+[void][Win]::GetWindowThreadProcessId($hwnd, [ref]$winpid)
+Write-Output ("login: winpid=" + $winpid)
 function Get-Value($el) {
   try { return $el.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value } catch { return '<n/a>' }
 }
@@ -146,9 +157,13 @@ function Set-Field($el, $text, $label, $h) {
 }
 if (-not (Foreground-Launcher $hwnd)) { Write-Output "login: ABORT (cannot bring launcher to foreground)"; exit 2 }
 Start-Sleep -Milliseconds 300
-Set-Field $loginEl $login 'login-field' $hwnd
-Start-Sleep -Milliseconds 300
-Write-Output ("login-field value now='" + (Get-Value $loginEl) + "'")
+$typed = $false
+for ($t = 0; $t -lt 3 -and -not $typed; $t++) {
+  Set-Field $loginEl $login 'login-field' $hwnd
+  Start-Sleep -Milliseconds 200
+  if ((Get-Value $loginEl) -eq $login) { $typed = $true }
+}
+Write-Output ("login-field value now='" + (Get-Value $loginEl) + "' verified=" + $typed)
 Set-Field $passEl $password 'pass-field' $hwnd
 Start-Sleep -Milliseconds 200
 try {
@@ -156,29 +171,85 @@ try {
   $inv.Invoke()
   Write-Output "login: invoked Вход"
 } catch { Write-Output "login: Invoke failed" }
-Start-Sleep -Milliseconds 3000
-try {
-  $r2 = [Windows.Automation.AutomationElement]::FromHandle($hwnd)
-  $txtCond = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Text)
-  $txts = $r2.FindAll([Windows.Automation.TreeScope]::Descendants, $txtCond)
-  $msgs = @()
-  for ($i = 0; $i -lt $txts.Count; $i++) { $n = $txts.Item($i).Current.Name; if ($n) { $msgs += $n } }
-  Write-Output ("after-invoke texts: [" + ($msgs -join ' | ') + "]")
-  $joined = ($msgs -join ' ')
-  if ($joined -match '(еправильн|еверн)' -and $joined -match '(логин|парол)') {
-    Write-Output "login: wrong credentials detected"
-    exit 4
-  }
-  $still = $r2.FindFirst([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, 'Вход'))
-  Write-Output ("after-invoke login-button-still-present=" + ($null -ne $still))
-} catch {}
+$txtCond = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Text)
+$errDeadline = [DateTime]::UtcNow.AddSeconds(8)
+while ([DateTime]::UtcNow -lt $errDeadline) {
+  Start-Sleep -Milliseconds 300
+  try {
+    $r2 = [Windows.Automation.AutomationElement]::FromHandle($hwnd)
+    $txts = $r2.FindAll([Windows.Automation.TreeScope]::Descendants, $txtCond)
+    $msgs = @()
+    for ($i = 0; $i -lt $txts.Count; $i++) { $n = $txts.Item($i).Current.Name; if ($n) { $msgs += $n } }
+    $joined = ($msgs -join ' ')
+    if ($joined -match 'auth-login') { Write-Output ("login: auth-login error [" + $joined + "]"); exit 5 }
+    if ($joined -match '(еправильн|еверн|nvalid|ncorrect|rong)' -and $joined -match '(логин|парол|ogin|assword)') {
+      Write-Output "login: wrong credentials detected"; exit 4
+    }
+    $bb = $r2.FindAll([Windows.Automation.TreeScope]::Descendants, $btnCond)
+    $stillLogin = $false
+    for ($i = 0; $i -lt $bb.Count; $i++) { if ($loginLabels -contains $bb.Item($i).Current.Name) { $stillLogin = $true; break } }
+    if (-not $stillLogin) { Write-Output "login: form gone (logged in)"; exit 0 }
+  } catch {}
+}
+Write-Output "login: no verdict within window"
 exit 0
 `
 
-func UiaLogin(login, password string, timeoutSec int) (int, string) {
-	script := strings.Replace(uiaLoginScript, "{{TIMEOUT}}", strconv.Itoa(timeoutSec), 1)
+const uiaLogoutScript = `
+$ProgressPreference = 'SilentlyContinue'
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$settingsLabels = @('НАСТРОЙКИ','SETTINGS','Settings')
+$logoutLabels = @('Выйти из аккаунта','Log out','Logout','Log Out','Sign out','Sign Out')
+$loginLabels = @('Вход','Sign in','Sign In','Login','Log in','Log In')
+$deadline = [DateTime]::UtcNow.AddSeconds({{TIMEOUT}})
+function Get-Root() {
+  foreach ($p in Get-Process -ErrorAction SilentlyContinue) {
+    if ($p.MainWindowHandle -eq [IntPtr]::Zero) { continue }
+    try {
+      $r = [Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
+      if ($r.Current.Name -eq 'Cristalix') { return $r }
+    } catch {}
+  }
+  return $null
+}
+function Find-Button($root, $labels) {
+  if ($null -eq $root) { return $null }
+  $cond = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Button)
+  $btns = $root.FindAll([Windows.Automation.TreeScope]::Descendants, $cond)
+  for ($i = 0; $i -lt $btns.Count; $i++) {
+    $bn = $btns.Item($i)
+    try { if (($labels -contains $bn.Current.Name) -and $bn.Current.IsEnabled) { return $bn } } catch {}
+  }
+  return $null
+}
+function Invoke-El($el) {
+  try { $el.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke(); return $true } catch { return $false }
+}
+if (Find-Button (Get-Root) $loginLabels) { Write-Output 'logout: already on login form'; exit 0 }
+$clicked = $false
+while ([DateTime]::UtcNow -lt $deadline -and -not $clicked) {
+  $root = Get-Root
+  $l = Find-Button $root $logoutLabels
+  if ($l) { if (Invoke-El $l) { $clicked = $true; break } }
+  else {
+    $s = Find-Button $root $settingsLabels
+    if ($s) { Invoke-El $s | Out-Null }
+  }
+  Start-Sleep -Milliseconds 250
+}
+if (-not $clicked) { Write-Output 'logout: could not reach logout button'; exit 1 }
+while ([DateTime]::UtcNow -lt $deadline) {
+  if (Find-Button (Get-Root) $loginLabels) { Write-Output 'logout: back to login form'; exit 0 }
+  Start-Sleep -Milliseconds 200
+}
+Write-Output 'logout: login form did not reappear'; exit 3
+`
+
+func UiaLogout(timeoutSec int) (int, string) {
+	script := strings.Replace(uiaLogoutScript, "{{TIMEOUT}}", strconv.Itoa(timeoutSec), 1)
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowershell(script))
-	cmd.Env = append(CleanEnv(), "AC_IMPORT_LOGIN="+login, "AC_IMPORT_PASS="+password)
+	cmd.Env = CleanEnv()
 	detach(cmd)
 	out, err := cmd.CombinedOutput()
 	msg := strings.TrimSpace(string(out))
@@ -189,4 +260,34 @@ func UiaLogin(login, password string, timeoutSec int) (int, string) {
 		return -1, msg + " | run error: " + err.Error()
 	}
 	return 0, msg
+}
+
+func parseWinpid(out string) int {
+	i := strings.Index(out, "winpid=")
+	if i < 0 {
+		return 0
+	}
+	v := out[i+len("winpid="):]
+	n := 0
+	for k := 0; k < len(v) && v[k] >= '0' && v[k] <= '9'; k++ {
+		n = n*10 + int(v[k]-'0')
+	}
+	return n
+}
+
+func UiaLogin(login, password string, timeoutSec int) (code, winpid int, out string) {
+	script := strings.Replace(uiaLoginScript, "{{TIMEOUT}}", strconv.Itoa(timeoutSec), 1)
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowershell(script))
+	cmd.Env = append(CleanEnv(), "AC_IMPORT_LOGIN="+login, "AC_IMPORT_PASS="+password)
+	detach(cmd)
+	raw, err := cmd.CombinedOutput()
+	msg := strings.TrimSpace(string(raw))
+	winpid = parseWinpid(msg)
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return ee.ExitCode(), winpid, msg
+		}
+		return -1, winpid, msg + " | run error: " + err.Error()
+	}
+	return 0, winpid, msg
 }

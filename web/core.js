@@ -16,6 +16,8 @@ const state = {
   groups: [],
   selectedGroup: null,
   groupLaunchProgress: null,
+  launchQueue: [],
+  queuePeak: 0,
   filters: { groups: new Set(), noRole: false, expired: false },
   sort: { key: null, dir: 'desc' },
 }

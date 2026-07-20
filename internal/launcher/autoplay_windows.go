@@ -14,21 +14,28 @@ const autoPlayScript = `
 $ProgressPreference = 'SilentlyContinue'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
-$cond = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, 'ИГРАТЬ')
+$playLabels = @('ИГРАТЬ','PLAY','Play')
+$btnCond = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Button)
 $deadline = [DateTime]::UtcNow.AddSeconds({{TIMEOUT}})
+$clickedAny = $false
+$quiet = 0
 while ([DateTime]::UtcNow -lt $deadline) {
+  $foundThisPass = $false
   foreach ($p in Get-Process -ErrorAction SilentlyContinue) {
     if ($p.MainWindowHandle -eq [IntPtr]::Zero) { continue }
     if ($p.MainWindowTitle -ne 'Cristalix') { continue }
     try {
       $root = [Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
-      $el = $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $cond)
-      if ($el -and $el.Current.ControlType -eq [Windows.Automation.ControlType]::Button -and $el.Current.IsEnabled) {
-        $el.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
-        exit 0
+      $btns = $root.FindAll([Windows.Automation.TreeScope]::Descendants, $btnCond)
+      for ($i = 0; $i -lt $btns.Count; $i++) {
+        $bn = $btns.Item($i)
+        if (($playLabels -contains $bn.Current.Name) -and $bn.Current.IsEnabled) {
+          try { $bn.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke(); $clickedAny = $true; $foundThisPass = $true } catch {}
+        }
       }
     } catch {}
   }
+  if ($clickedAny -and -not $foundThisPass) { $quiet++; if ($quiet -ge 100) { exit 0 } } else { $quiet = 0 }
   Start-Sleep -Milliseconds 100
 }
 `
@@ -55,24 +62,28 @@ const autoPlayPidScript = `
 $ProgressPreference = 'SilentlyContinue'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
-$cond = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, 'ИГРАТЬ')
+$playLabels = @('ИГРАТЬ','PLAY','Play')
+$btnCond = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Button)
 $deadline = [DateTime]::UtcNow.AddSeconds({{TIMEOUT}})
 while ([DateTime]::UtcNow -lt $deadline) {
   $p = Get-Process -Id {{PID}} -ErrorAction SilentlyContinue
   if ($p -and $p.MainWindowHandle -ne [IntPtr]::Zero) {
     try {
       $root = [Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
-      $el = $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $cond)
-      if ($el -and $el.Current.ControlType -eq [Windows.Automation.ControlType]::Button -and $el.Current.IsEnabled) {
-        $el.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
-        Write-Output "clicked ИГРАТЬ"; exit 0
+      $btns = $root.FindAll([Windows.Automation.TreeScope]::Descendants, $btnCond)
+      for ($i = 0; $i -lt $btns.Count; $i++) {
+        $bn = $btns.Item($i)
+        if (($playLabels -contains $bn.Current.Name) -and $bn.Current.IsEnabled) {
+          $bn.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+          Write-Output "clicked play"; exit 0
+        }
       }
     }
     catch {}
   }
   Start-Sleep -Milliseconds 100
 }
-Write-Output "ИГРАТЬ not found/clicked"; exit 1
+Write-Output "play not found/clicked"; exit 1
 `
 
 func ClickPlayButtonForPid(pid, timeoutSec int) {

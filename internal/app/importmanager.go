@@ -109,6 +109,17 @@ func (s *Server) startImport(accounts []credPair) (bool, string) {
 	return true, ""
 }
 
+func importRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch err.Error() {
+	case "неправильный логин или пароль", "укажите логин и пароль", "отменено", "Неизвестная ошибка: auth-login", errNoUIAutomation.Error():
+		return false
+	}
+	return true
+}
+
 func (s *Server) runImport(tasks []importTask) {
 	defer func() {
 		s.finishImport()
@@ -117,27 +128,7 @@ func (s *Server) runImport(tasks []importTask) {
 		s.imp.updated = time.Now()
 		s.imp.mu.Unlock()
 	}()
-	for i := range tasks {
-		if s.importCanceled() {
-			s.markRestCanceled()
-			return
-		}
-		s.setItem(tasks[i].item, "working", "вход…", "")
-		name, err := s.importByCredentials(tasks[i].item.Login, tasks[i].password)
-		tasks[i].password = ""
-		if s.importCanceled() {
-			if err == nil && name != "" {
-				s.setItem(tasks[i].item, "ok", "✓ "+name, name)
-			}
-			s.markRestCanceled()
-			return
-		}
-		if err != nil {
-			s.setItem(tasks[i].item, "err", err.Error(), "")
-		} else {
-			s.setItem(tasks[i].item, "ok", "✓ "+name, name)
-		}
-	}
+	s.importAll(tasks)
 }
 
 func (s *Server) setItem(it *importItem, status, text, name string) {

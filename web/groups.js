@@ -19,7 +19,7 @@ async function applyGroupRam() {
   const chunks = Math.max(0, Math.min(32, +document.getElementById('ls-chunks').value || 0))
   const fps = Math.max(0, Math.min(260, +document.getElementById('ls-fps').value || 0))
   const payload = Object.assign(
-    { uuids, ram, renderDistance: chunks, maxFps: fps, animations: state.lsClient.animations, fastRender: state.lsClient.fastRender },
+    { uuids, ram, renderDistance: chunks, maxFps: fps, animations: state.lsClient.animations, fastRender: state.lsClient.fastRender, minimal: !!state.lsMinimal },
     state.lsSettings,
   )
   try {

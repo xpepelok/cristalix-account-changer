@@ -159,6 +159,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/accounts", s.handleAccounts)
 	mux.HandleFunc("/api/launch", s.handleLaunch)
 	mux.HandleFunc("/api/launch-guest", s.handleLaunchGuest)
+	mux.HandleFunc("/api/launch-queue", s.handleLaunchQueue)
 	mux.HandleFunc("/api/accounts/import-start", s.handleImportStart)
 	mux.HandleFunc("/api/accounts/import-progress", s.handleImportProgress)
 	mux.HandleFunc("/api/accounts/import-cancel", s.handleImportCancel)
@@ -226,6 +227,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"launcherReady": fileExists(s.paths.LauncherExe),
 		"dataDir":       s.paths.Data,
 	})
+}
+
+func (s *Server) handleLaunchQueue(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.queue.QueueStatus())
 }
 
 func (s *Server) handleAccounts(w http.ResponseWriter, r *http.Request) {
@@ -310,7 +315,7 @@ func (s *Server) startChosenLauncher() error {
 			return err
 		}
 		java := launcher.ResolveJava(s.paths.Cristalix)
-		return launcher.StartLauncherJar(java, s.paths.LauncherJar, nil, nil)
+		return launcher.StartLauncherJar(java, s.paths.LauncherJar, "", nil, nil)
 	case config.LauncherNew:
 		if err := launcher.EnsureLauncherFrom(s.paths.StaffLauncherExe, launcher.StaffLauncherURL); err != nil {
 			return err
@@ -444,9 +449,16 @@ func (s *Server) clientDirFor(client string) string {
 }
 
 func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
+	profiles := []string{launcher.MinimalProfileName}
+	for _, p := range launcher.ListProfiles(s.paths.Profiles) {
+		if p != launcher.MinimalProfileName {
+			profiles = append(profiles, p)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"profiles": launcher.ListProfiles(s.paths.Profiles),
+		"profiles": profiles,
 		"files":    launcher.ProfileFiles,
+		"builtin":  []string{launcher.MinimalProfileName},
 	})
 }
 
@@ -466,6 +478,10 @@ func (s *Server) handleProfileSave(w http.ResponseWriter, r *http.Request) {
 	name := launcher.SanitizeProfileName(body.Name)
 	if name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "введите название профиля"})
+		return
+	}
+	if name == launcher.MinimalProfileName {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "это имя занято встроенным профилем"})
 		return
 	}
 	clientDir := s.clientDirFor(body.Client)
@@ -491,6 +507,10 @@ func (s *Server) handleProfileContent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no name"})
 		return
 	}
+	if name == launcher.MinimalProfileName {
+		writeJSON(w, http.StatusOK, launcher.MinimalProfileContent())
+		return
+	}
 	writeJSON(w, http.StatusOK, launcher.ReadProfile(s.paths.Profiles, name))
 }
 
@@ -510,6 +530,10 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 	name := launcher.SanitizeProfileName(body.Name)
 	if name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no name"})
+		return
+	}
+	if name == launcher.MinimalProfileName {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "встроенный профиль нельзя редактировать"})
 		return
 	}
 	if err := launcher.WriteProfile(s.paths.Profiles, name, body.Files); err != nil {
@@ -532,6 +556,10 @@ func (s *Server) handleProfileDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := launcher.SanitizeProfileName(body.Name)
+	if name == launcher.MinimalProfileName {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "встроенный профиль нельзя удалить"})
+		return
+	}
 	if name != "" {
 		_ = launcher.DeleteProfile(s.paths.Profiles, name)
 	}
@@ -593,6 +621,7 @@ func (s *Server) handleLaunchSettings(w http.ResponseWriter, r *http.Request) {
 		MaxFps         int      `json:"maxFps"`
 		Animations     int      `json:"animations"`
 		FastRender     int      `json:"fastRender"`
+		Minimal        bool     `json:"minimal"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
@@ -600,6 +629,9 @@ func (s *Server) handleLaunchSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	ram := body.Ram
 	if ram != 0 && ram < 1024 {
+		ram = 1024
+	}
+	if body.Minimal && ram < 1024 {
 		ram = 1024
 	}
 	s.vault.SetLaunchSettings(body.UUIDs, vault.LaunchOpts{
@@ -613,6 +645,7 @@ func (s *Server) handleLaunchSettings(w http.ResponseWriter, r *http.Request) {
 		MaxFps:         body.MaxFps,
 		Animations:     body.Animations,
 		FastRender:     body.FastRender,
+		Minimal:        body.Minimal,
 	})
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

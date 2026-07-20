@@ -11,8 +11,10 @@ async function loadProfiles() {
   try {
     const data = await apiGet('/api/profiles')
     state.profiles = data.profiles || []
+    state.builtinProfiles = data.builtin || []
   } catch (e) {
     state.profiles = []
+    state.builtinProfiles = []
   }
 }
 
@@ -45,7 +47,7 @@ async function renderProfilesList() {
   list.innerHTML = state.profiles
     .map(
       (p) =>
-        `<button class="profile-item${p === state.editingProfile ? ' active' : ''}" data-name="${esc(p)}"><span class="profile-item-name">${esc(p)}</span></button>`,
+        `<button class="profile-item${p === state.editingProfile ? ' active' : ''}" data-name="${esc(p)}"><span class="profile-item-name">${esc(p)}</span>${(state.builtinProfiles || []).includes(p) ? '<span class="profile-item-badge">встроенный</span>' : ''}</button>`,
     )
     .join('')
   list.querySelectorAll('.profile-item').forEach((el) => {
@@ -69,10 +71,13 @@ async function editProfile(name) {
     /* empty */
   }
   if (state.editingProfile !== name) return
+  const builtin = (state.builtinProfiles || []).includes(name)
   const editor = document.getElementById('profiles-editor')
-  editor.innerHTML = buildEditor(name, content)
-  document.getElementById('editor-save').addEventListener('click', () => saveEditorProfile(name))
-  document.getElementById('editor-delete').addEventListener('click', () => deleteEditorProfile(name))
+  editor.innerHTML = buildEditor(name, content, builtin)
+  if (!builtin) {
+    document.getElementById('editor-save').addEventListener('click', () => saveEditorProfile(name))
+    document.getElementById('editor-delete').addEventListener('click', () => deleteEditorProfile(name))
+  }
 }
 
 async function saveEditorProfile(name) {

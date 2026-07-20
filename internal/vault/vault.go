@@ -28,6 +28,7 @@ type Account struct {
 	MaxFps         int    `json:"maxFps"`
 	Animations     int    `json:"animations"`
 	FastRender     int    `json:"fastRender"`
+	Minimal        bool   `json:"minimal"`
 	Expires        int64  `json:"expires"`
 	FirstSeen      int64  `json:"firstSeen"`
 	LastSeen       int64  `json:"lastSeen"`
@@ -45,6 +46,7 @@ type LaunchOpts struct {
 	MaxFps         int
 	Animations     int
 	FastRender     int
+	Minimal        bool
 }
 
 type Group struct {
@@ -210,6 +212,7 @@ func (v *Vault) SetLaunchSettings(uuids []string, opts LaunchOpts) {
 			acc.MaxFps = opts.MaxFps
 			acc.Animations = opts.Animations
 			acc.FastRender = opts.FastRender
+			acc.Minimal = opts.Minimal
 			changed = true
 		}
 	}
