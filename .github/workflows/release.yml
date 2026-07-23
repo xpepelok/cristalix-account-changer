@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ["AccountChanger-*"]
+    branches: ["master"]
 
 permissions:
   contents: read
@@ -10,22 +10,21 @@ permissions:
 jobs:
   guard:
     runs-on: ubuntu-latest
+    outputs:
+      app_version: ${{ steps.version.outputs.app_version }}
     steps:
       - uses: actions/checkout@v7
 
-      - name: Тег должен совпадать с AppVersion
+      - name: Read AppVersion
+        id: version
         run: |
-          tag="${GITHUB_REF_NAME#AccountChanger-}"
           appv="$(sed -nE 's/^const AppVersion = "(.*)"$/\1/p' internal/update/updater.go)"
-          echo "тег=$tag  AppVersion=$appv"
+          echo "AppVersion=$appv"
           if [ -z "$appv" ]; then
-            echo "::error::не смог прочитать AppVersion из internal/update/updater.go"
+            echo "::error::failed to read AppVersion from internal/update/updater.go"
             exit 1
           fi
-          if [ "$tag" != "$appv" ]; then
-            echo "::error::тег $tag не совпадает с AppVersion $appv (internal/update/updater.go)"
-            exit 1
-          fi
+          echo "app_version=$appv" >> "$GITHUB_OUTPUT"
 
   windows:
     needs: guard
@@ -40,7 +39,7 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Сборка
+      - name: Build
         shell: bash
         run: go build -trimpath -ldflags "-s -w -H=windowsgui -buildid=" -o out/AccountChanger.exe .
 
@@ -60,7 +59,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Зависимости
+      - name: Dependencies
         run: |
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
@@ -68,7 +67,7 @@ jobs:
       - name: Trust workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Сборка
+      - name: Build
         run: go build -trimpath -ldflags "-s -w -buildid=" -o out/AccountChanger-linux-x86_64 .
 
       - uses: actions/upload-artifact@v7
@@ -83,17 +82,34 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+
       - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
 
-      - name: Контрольные суммы
+      - name: Check release notes
+        run: |
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "::error::RELEASE_NOTES.md is empty or missing"
+            exit 1
+          fi
+          if grep -qi "TODO" RELEASE_NOTES.md; then
+            echo "::error::RELEASE_NOTES.md still contains TODO"
+            exit 1
+          fi
+
+      - name: Checksums
         working-directory: dist
         run: sha256sum AccountChanger.exe AccountChanger-linux-x86_64 > checksums.txt
 
       - uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ needs.guard.outputs.app_version }}
+          name: ${{ needs.guard.outputs.app_version }}
+          target_commitish: ${{ github.sha }}
+          body_path: RELEASE_NOTES.md
           files: |
             dist/AccountChanger.exe
             dist/AccountChanger-linux-x86_64
@@ -101,4 +117,3 @@ jobs:
           draft: false
           prerelease: false
           make_latest: true
-          generate_release_notes: true
