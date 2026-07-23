@@ -21,6 +21,9 @@ func gameWindowPids() []uint32 {
 		if !p.isJava() || !p.isGame() {
 			continue
 		}
+		if isLauncherPid(p.pid) {
+			continue
+		}
 		pids = append(pids, p.pid)
 	}
 	sort.Slice(pids, func(i, j int) bool { return pids[i] < pids[j] })
@@ -47,6 +50,16 @@ func javaProcessPids() map[uint32]bool {
 	for _, p := range scanProcs(true) {
 		if p.isJava() {
 			out[p.pid] = true
+		}
+	}
+	return out
+}
+
+func ProcessTreePids(root uint32) []uint32 {
+	out := []uint32{root}
+	for pid := range processDescendantsOf(root) {
+		if pid != root {
+			out = append(out, pid)
 		}
 	}
 	return out

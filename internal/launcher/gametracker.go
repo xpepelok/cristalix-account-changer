@@ -126,14 +126,25 @@ func (t *GameTracker) bindGame(uuid string, before []uint32) uint32 {
 	for _, p := range before {
 		beforeSet[p] = true
 	}
-	deadline := time.Now().Add(40 * time.Second)
+	deadline := time.Now().Add(90 * time.Second)
 	for {
 		pids := gameWindowPids()
+		live := map[uint32]bool{}
+		for _, p := range pids {
+			live[p] = true
+		}
 		t.mu.Lock()
 		claimed := map[uint32]bool{}
 		for _, r := range t.launched {
 			if r.Pid != 0 {
 				claimed[r.Pid] = true
+			}
+		}
+		for i := range t.launched {
+			if t.launched[i].UUID == uuid && t.launched[i].Pid != 0 && live[t.launched[i].Pid] {
+				pid := t.launched[i].Pid
+				t.mu.Unlock()
+				return pid
 			}
 		}
 		var found uint32
@@ -197,10 +208,7 @@ func (t *GameTracker) bindVerifiedLauncher(uuid string, launcherPID uint32) uint
 
 func (t *GameTracker) Resolve() (map[string]uint32, map[string]bool) {
 	pids := gameWindowPids()
-	live := map[uint32]bool{}
-	for _, p := range pids {
-		live[p] = true
-	}
+	alive := javaProcessPids()
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -213,7 +221,7 @@ func (t *GameTracker) Resolve() (map[string]uint32, map[string]bool) {
 
 	for i := range t.launched {
 		r := &t.launched[i]
-		if r.Pid != 0 && live[r.Pid] && !claimed[r.Pid] {
+		if r.Pid != 0 && alive[r.Pid] && !claimed[r.Pid] {
 			claimed[r.Pid] = true
 			running[r.UUID] = r.Pid
 		} else if r.Pid != 0 {

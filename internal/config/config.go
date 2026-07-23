@@ -18,6 +18,7 @@ type AppConfig struct {
 	CustomLauncher string `json:"customLauncher,omitempty"`
 	AutoPlay       *bool  `json:"autoPlay,omitempty"`
 	Stats          *bool  `json:"stats,omitempty"`
+	Aggressive     *bool  `json:"aggressive,omitempty"`
 }
 
 type ConfigStore struct {
@@ -29,7 +30,8 @@ type ConfigStore struct {
 func OpenConfig(path string) *ConfigStore {
 	def := true
 	defStats := true
-	c := &ConfigStore{path: path, cfg: AppConfig{Launcher: LauncherJar, AutoPlay: &def, Stats: &defStats}}
+	defAgg := false
+	c := &ConfigStore{path: path, cfg: AppConfig{Launcher: LauncherJar, AutoPlay: &def, Stats: &defStats, Aggressive: &defAgg}}
 	if data, err := os.ReadFile(path); err == nil {
 		var stored AppConfig
 		if json.Unmarshal(data, &stored) == nil {
@@ -42,6 +44,9 @@ func OpenConfig(path string) *ConfigStore {
 			}
 			if stored.Stats != nil {
 				*c.cfg.Stats = *stored.Stats
+			}
+			if stored.Aggressive != nil {
+				*c.cfg.Aggressive = *stored.Aggressive
 			}
 		}
 	}
@@ -71,6 +76,19 @@ func (c *ConfigStore) SetAutoPlay(v bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	*c.cfg.AutoPlay = v
+	c.save()
+}
+
+func (c *ConfigStore) AggressiveLaunch() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cfg.Aggressive != nil && *c.cfg.Aggressive
+}
+
+func (c *ConfigStore) SetAggressiveLaunch(v bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	*c.cfg.Aggressive = v
 	c.save()
 }
 

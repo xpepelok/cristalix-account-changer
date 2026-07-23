@@ -84,7 +84,7 @@ func TailGameLog(updates, client, uuid, name string, store *LogStore, ready func
 				break
 			}
 		}
-		time.Sleep(120 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 	if claimed == "" && ready != nil {
 		ready(false)
@@ -136,7 +136,7 @@ func renameOpenLog(from, to string) bool {
 		if err := os.Rename(from, to); err == nil {
 			return true
 		}
-		time.Sleep(80 * time.Millisecond)
+		time.Sleep(15 * time.Millisecond)
 	}
 	return false
 }

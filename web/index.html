@@ -130,18 +130,23 @@
         </div>
       </div>
 
-      <div id="grid" class="accounts-grid"></div>
-      <div id="group-empty" class="group-empty" hidden>
-        <div class="group-empty-text">В этой группе пока нет аккаунтов</div>
-        <button class="group-add-center" id="group-add-center" title="Добавить аккаунты" aria-label="Добавить аккаунты">
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 6v12M6 12h12" /></svg>
-        </button>
-      </div>
-      <div id="empty" class="state" hidden>
-        Пока пусто. Зайди на любой аккаунт через лаунчер - токен сохранится сюда сам.
+      <div class="acc-scroll">
+        <div id="grid" class="accounts-grid"></div>
+        <div id="group-empty" class="group-empty" hidden>
+          <div class="group-empty-text">В этой группе пока нет аккаунтов</div>
+          <button class="group-add-center" id="group-add-center" title="Добавить аккаунты" aria-label="Добавить аккаунты">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 6v12M6 12h12" /></svg>
+          </button>
+        </div>
+        <div id="empty" class="state" hidden>
+          Пока пусто. Зайди на любой аккаунт через лаунчер - токен сохранится сюда сам.
+        </div>
       </div>
 
-      <div class="footer">with love from <a class="footer-name" id="footer-link" href="https://github.com/xpepelok">xpepelok</a> <span class="footer-heart">♥</span></div>
+<!--      <div class="footer">with love from <a class="footer-name" id="footer-link" href="https://github.com/xpepelok">xpepelok</a> <span class="footer-heart">♥</span></div>-->
+      <div class="footer">with love from <a class="footer-name" id="footer-link" href="https://top.cristalix.gg/profile/Pepel_ok">xpepelok</a> <span class="footer-heart">♥</span></div>
+
+    <button class="tg-fab" id="tg-link" data-tip="Dev-блог разработчика" aria-label="Dev-блог разработчика"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg></button>
     </div>
 
     <div class="overlay" id="overlay" hidden>
@@ -338,6 +343,15 @@
           </div>
           <div class="setting-row">
             <div class="setting-info">
+              <div class="setting-label">Агрессивный запуск</div>
+              <div class="setting-desc">Запускать аккаунты массово. Может сильно нагружать ваш ПК в момент запуска.</div>
+            </div>
+            <button class="toggle" id="toggle-aggressive" role="switch" aria-checked="false">
+              <span class="toggle-knob"></span>
+            </button>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
               <div class="setting-label">Отправка метрик</div>
               <div class="setting-desc">Синронизация такой информации, как онлайн. Если выключить - актуальный онлайн виден не будет.</div>
             </div>
@@ -427,7 +441,7 @@
         <div class="import-body">
           <div class="import-field">
             <label class="import-label" for="import-name">Название профиля</label>
-            <input type="text" class="import-name" id="import-name" placeholder="Например: PvP-настройки" maxlength="40" autocomplete="off" spellcheck="false" />
+            <input type="text" class="import-name" id="import-name" placeholder="Например: Anarchy-настройки" maxlength="40" autocomplete="off" spellcheck="false" />
           </div>
           <div class="import-drop" id="import-drop">
             <div class="import-plus">＋</div>
@@ -504,7 +518,7 @@
     <div class="overlay prompt-overlay" id="prompt-overlay" hidden>
       <div class="modal prompt-modal">
         <div class="prompt-title" id="prompt-title">Название профиля</div>
-        <input class="label-input" id="prompt-input" maxlength="40" autocomplete="off" spellcheck="false" placeholder="например: PvP" />
+        <input class="label-input" id="prompt-input" maxlength="40" autocomplete="off" spellcheck="false" placeholder="например: Анархия" />
         <div class="prompt-actions">
           <button class="action-btn ghost" id="prompt-cancel">Отмена</button>
           <button class="action-btn primary" id="prompt-ok">Сохранить</button>
@@ -526,9 +540,13 @@
       </div>
     </div>
 
-    <button class="tg-fab" id="tg-link" data-tip="Dev-блог разработчика" aria-label="Dev-блог разработчика">
-      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
-    </button>
+    <div id="queue-dd" hidden>
+      <button class="acc-fab queue-fab" id="queue-btn" title="Очередь запускаемых аккаунтов" aria-label="Очередь запускаемых аккаунтов">
+        <span class="queue-ring" id="queue-ring" style="--fill: 0"></span>
+        <span class="queue-count" id="queue-count">0</span>
+      </button>
+      <div class="queue-menu" id="queue-menu" hidden></div>
+    </div>
 
     <button class="acc-fab" id="cred-btn" title="Импорт аккаунтов" aria-label="Импорт аккаунтов по логину">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
@@ -545,6 +563,18 @@
     <div class="ctx-menu" id="ctx-menu" hidden></div>
 
     <script src="/sound.js"></script>
-    <script src="/app.js"></script>
+    <script src="/core.js"></script>
+    <script src="/ui.js"></script>
+    <script src="/cards.js"></script>
+    <script src="/player.js"></script>
+    <script src="/modal.js"></script>
+    <script src="/groups.js"></script>
+    <script src="/profiles.js"></script>
+    <script src="/logs.js"></script>
+    <script src="/import.js"></script>
+    <script src="/settings.js"></script>
+    <script src="/update.js"></script>
+    <script src="/launchqueue.js"></script>
+    <script src="/boot.js"></script>
   </body>
 </html>

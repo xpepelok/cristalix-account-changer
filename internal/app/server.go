@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"accountchanger/internal/config"
@@ -19,11 +19,17 @@ import (
 	"time"
 )
 
-//go:embed web
-var webFiles embed.FS
-
-//go:embed assets/icon.png
-var iconBytes []byte
+type Deps struct {
+	Paths   platform.Paths
+	Vault   *vault.Vault
+	Watcher *launcher.Watcher
+	Queue   *launcher.LaunchQueue
+	Tracker *launcher.GameTracker
+	Logs    *launcher.LogStore
+	Cfg     *config.ConfigStore
+	Web     embed.FS
+	Icon    []byte
+}
 
 type Server struct {
 	paths   platform.Paths
@@ -33,6 +39,8 @@ type Server struct {
 	tracker *launcher.GameTracker
 	logs    *launcher.LogStore
 	cfg     *config.ConfigStore
+	web     embed.FS
+	icon    []byte
 	quit    chan struct{}
 	restart func()
 	focusMu sync.Mutex
@@ -43,10 +51,37 @@ type Server struct {
 	imp        importJob
 }
 
-func (s *Server) setFocus(f func()) {
+func New(d Deps) *Server {
+	return &Server{
+		paths:   d.Paths,
+		vault:   d.Vault,
+		watcher: d.Watcher,
+		queue:   d.Queue,
+		tracker: d.Tracker,
+		logs:    d.Logs,
+		cfg:     d.Cfg,
+		web:     d.Web,
+		icon:    d.Icon,
+		quit:    make(chan struct{}),
+	}
+}
+
+func (s *Server) SetFocus(f func()) {
 	s.focusMu.Lock()
 	s.focus = f
 	s.focusMu.Unlock()
+}
+
+func (s *Server) SetRestart(f func()) {
+	s.restart = f
+}
+
+func (s *Server) Quit() {
+	close(s.quit)
+}
+
+func (s *Server) Wait() {
+	<-s.quit
 }
 
 type accountDTO struct {
@@ -75,10 +110,10 @@ type accountDTO struct {
 	FirstSeen      int64  `json:"firstSeen"`
 }
 
-func (s *Server) handler() http.Handler {
+func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	sub, _ := fs.Sub(webFiles, "web")
+	sub, _ := fs.Sub(s.web, "web")
 
 	noCache := func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -90,17 +125,21 @@ func (s *Server) handler() http.Handler {
 	}
 	fileServer := noCache(http.FileServer(http.FS(sub)))
 	mux.Handle("/assets/", fileServer)
-	mux.Handle("/skinview3d.bundle.js", fileServer)
-	mux.Handle("/app.js", fileServer)
-	mux.Handle("/sound.js", fileServer)
-	mux.Handle("/theme.css", fileServer)
+	if entries, err := fs.ReadDir(sub, "."); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || e.Name() == "index.html" {
+				continue
+			}
+			mux.Handle("/"+e.Name(), fileServer)
+		}
+	}
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
-		data, err := webFiles.ReadFile("web/index.html")
+		data, err := s.web.ReadFile("web/index.html")
 		if err != nil {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
@@ -112,7 +151,7 @@ func (s *Server) handler() http.Handler {
 
 	mux.HandleFunc("/favicon.png", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		_, _ = w.Write(iconBytes)
+		_, _ = w.Write(s.icon)
 	})
 
 	mux.HandleFunc("/api/caps", s.handleCaps)
@@ -120,6 +159,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("/api/accounts", s.handleAccounts)
 	mux.HandleFunc("/api/launch", s.handleLaunch)
 	mux.HandleFunc("/api/launch-guest", s.handleLaunchGuest)
+	mux.HandleFunc("/api/launch-queue", s.handleLaunchQueue)
 	mux.HandleFunc("/api/accounts/import-start", s.handleImportStart)
 	mux.HandleFunc("/api/accounts/import-progress", s.handleImportProgress)
 	mux.HandleFunc("/api/accounts/import-cancel", s.handleImportCancel)
@@ -158,6 +198,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("/api/settings/launcher", s.handleSettingsLauncher)
 	mux.HandleFunc("/api/settings/custom-launcher", s.handleSettingsCustomLauncher)
 	mux.HandleFunc("/api/settings/autoplay", s.handleSettingsAutoPlay)
+	mux.HandleFunc("/api/settings/aggressive", s.handleSettingsAggressive)
 	mux.HandleFunc("/api/settings/stats", s.handleSettingsStats)
 	mux.HandleFunc("/api/stats", s.handleStats)
 	mux.HandleFunc("/api/logs", s.handleLogs)
@@ -187,6 +228,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"launcherReady": fileExists(s.paths.LauncherExe),
 		"dataDir":       s.paths.Data,
 	})
+}
+
+func (s *Server) handleLaunchQueue(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.queue.QueueStatus())
 }
 
 func (s *Server) handleAccounts(w http.ResponseWriter, r *http.Request) {
@@ -271,7 +316,7 @@ func (s *Server) startChosenLauncher() error {
 			return err
 		}
 		java := launcher.ResolveJava(s.paths.Cristalix)
-		return launcher.StartLauncherJar(java, s.paths.LauncherJar, nil, nil)
+		return launcher.StartLauncherJar(java, s.paths.LauncherJar, "", nil, nil)
 	case config.LauncherNew:
 		if err := launcher.EnsureLauncherFrom(s.paths.StaffLauncherExe, launcher.StaffLauncherURL); err != nil {
 			return err
@@ -405,9 +450,16 @@ func (s *Server) clientDirFor(client string) string {
 }
 
 func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
+	profiles := []string{launcher.MinimalProfileName}
+	for _, p := range launcher.ListProfiles(s.paths.Profiles) {
+		if p != launcher.MinimalProfileName {
+			profiles = append(profiles, p)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"profiles": launcher.ListProfiles(s.paths.Profiles),
+		"profiles": profiles,
 		"files":    launcher.ProfileFiles,
+		"builtin":  []string{launcher.MinimalProfileName},
 	})
 }
 
@@ -427,6 +479,10 @@ func (s *Server) handleProfileSave(w http.ResponseWriter, r *http.Request) {
 	name := launcher.SanitizeProfileName(body.Name)
 	if name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "введите название профиля"})
+		return
+	}
+	if name == launcher.MinimalProfileName {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "это имя занято встроенным профилем"})
 		return
 	}
 	clientDir := s.clientDirFor(body.Client)
@@ -452,6 +508,10 @@ func (s *Server) handleProfileContent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no name"})
 		return
 	}
+	if name == launcher.MinimalProfileName {
+		writeJSON(w, http.StatusOK, launcher.MinimalProfileContent())
+		return
+	}
 	writeJSON(w, http.StatusOK, launcher.ReadProfile(s.paths.Profiles, name))
 }
 
@@ -471,6 +531,10 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 	name := launcher.SanitizeProfileName(body.Name)
 	if name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no name"})
+		return
+	}
+	if name == launcher.MinimalProfileName {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "встроенный профиль нельзя редактировать"})
 		return
 	}
 	if err := launcher.WriteProfile(s.paths.Profiles, name, body.Files); err != nil {
@@ -493,6 +557,10 @@ func (s *Server) handleProfileDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := launcher.SanitizeProfileName(body.Name)
+	if name == launcher.MinimalProfileName {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "встроенный профиль нельзя удалить"})
+		return
+	}
 	if name != "" {
 		_ = launcher.DeleteProfile(s.paths.Profiles, name)
 	}
@@ -554,6 +622,7 @@ func (s *Server) handleLaunchSettings(w http.ResponseWriter, r *http.Request) {
 		MaxFps         int      `json:"maxFps"`
 		Animations     int      `json:"animations"`
 		FastRender     int      `json:"fastRender"`
+		Minimal        bool     `json:"minimal"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
@@ -561,6 +630,9 @@ func (s *Server) handleLaunchSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	ram := body.Ram
 	if ram != 0 && ram < 1024 {
+		ram = 1024
+	}
+	if body.Minimal && ram < 1024 {
 		ram = 1024
 	}
 	s.vault.SetLaunchSettings(body.UUIDs, vault.LaunchOpts{
@@ -574,6 +646,7 @@ func (s *Server) handleLaunchSettings(w http.ResponseWriter, r *http.Request) {
 		MaxFps:         body.MaxFps,
 		Animations:     body.Animations,
 		FastRender:     body.FastRender,
+		Minimal:        body.Minimal,
 	})
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
