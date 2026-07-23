@@ -208,10 +208,7 @@ func (t *GameTracker) bindVerifiedLauncher(uuid string, launcherPID uint32) uint
 
 func (t *GameTracker) Resolve() (map[string]uint32, map[string]bool) {
 	pids := gameWindowPids()
-	live := map[uint32]bool{}
-	for _, p := range pids {
-		live[p] = true
-	}
+	alive := javaProcessPids()
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -224,7 +221,7 @@ func (t *GameTracker) Resolve() (map[string]uint32, map[string]bool) {
 
 	for i := range t.launched {
 		r := &t.launched[i]
-		if r.Pid != 0 && live[r.Pid] && !claimed[r.Pid] {
+		if r.Pid != 0 && alive[r.Pid] && !claimed[r.Pid] {
 			claimed[r.Pid] = true
 			running[r.UUID] = r.Pid
 		} else if r.Pid != 0 {

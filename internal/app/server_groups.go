@@ -226,7 +226,7 @@ func (s *Server) handleGroupLaunchProgress(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"autostart": platform.AutostartEnabled(), "launcher": s.cfg.Launcher(), "customLauncher": s.cfg.CustomLauncher(), "autoPlay": s.cfg.AutoPlay(), "stats": s.cfg.Stats()})
+	writeJSON(w, http.StatusOK, map[string]any{"autostart": platform.AutostartEnabled(), "launcher": s.cfg.Launcher(), "customLauncher": s.cfg.CustomLauncher(), "autoPlay": s.cfg.AutoPlay(), "stats": s.cfg.Stats(), "aggressive": s.cfg.AggressiveLaunch()})
 }
 
 func (s *Server) handleSettingsCustomLauncher(w http.ResponseWriter, r *http.Request) {
@@ -287,6 +287,22 @@ func (s *Server) handleSettingsAutoPlay(w http.ResponseWriter, r *http.Request) 
 	}
 	s.cfg.SetAutoPlay(body.Enabled)
 	writeJSON(w, http.StatusOK, map[string]any{"autoPlay": s.cfg.AutoPlay()})
+}
+
+func (s *Server) handleSettingsAggressive(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if !decodeBody(r, &body) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	s.cfg.SetAggressiveLaunch(body.Enabled)
+	writeJSON(w, http.StatusOK, map[string]any{"aggressive": s.cfg.AggressiveLaunch()})
 }
 
 func (s *Server) handleSettingsLauncher(w http.ResponseWriter, r *http.Request) {

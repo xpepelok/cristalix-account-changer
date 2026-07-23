@@ -17,10 +17,7 @@ Add-Type -AssemblyName UIAutomationTypes
 $playLabels = @('ИГРАТЬ','PLAY','Play')
 $btnCond = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Button)
 $deadline = [DateTime]::UtcNow.AddSeconds({{TIMEOUT}})
-$clickedAny = $false
-$quiet = 0
 while ([DateTime]::UtcNow -lt $deadline) {
-  $foundThisPass = $false
   foreach ($p in Get-Process -ErrorAction SilentlyContinue) {
     if ($p.MainWindowHandle -eq [IntPtr]::Zero) { continue }
     if ($p.MainWindowTitle -ne 'Cristalix') { continue }
@@ -30,13 +27,12 @@ while ([DateTime]::UtcNow -lt $deadline) {
       for ($i = 0; $i -lt $btns.Count; $i++) {
         $bn = $btns.Item($i)
         if (($playLabels -contains $bn.Current.Name) -and $bn.Current.IsEnabled) {
-          try { $bn.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke(); $clickedAny = $true; $foundThisPass = $true } catch {}
+          try { $bn.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke() } catch {}
         }
       }
     } catch {}
   }
-  if ($clickedAny -and -not $foundThisPass) { $quiet++; if ($quiet -ge 100) { exit 0 } } else { $quiet = 0 }
-  Start-Sleep -Milliseconds 100
+  Start-Sleep -Milliseconds 300
 }
 `
 
@@ -54,7 +50,7 @@ func clickPlayButton(timeoutSec int) {
 	script := strings.Replace(autoPlayScript, "{{TIMEOUT}}", strconv.Itoa(timeoutSec), 1)
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowershell(script))
 	cmd.Env = CleanEnv()
-	detach(cmd)
+	hideConsole(cmd)
 	_ = cmd.Run()
 }
 
@@ -95,6 +91,6 @@ func ClickPlayButtonForPid(pid, timeoutSec int) {
 	script = strings.Replace(script, "{{PID}}", strconv.Itoa(pid), 1)
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowershell(script))
 	cmd.Env = CleanEnv()
-	detach(cmd)
+	hideConsole(cmd)
 	_ = cmd.Run()
 }

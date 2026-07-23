@@ -250,7 +250,7 @@ func UiaLogout(timeoutSec int) (int, string) {
 	script := strings.Replace(uiaLogoutScript, "{{TIMEOUT}}", strconv.Itoa(timeoutSec), 1)
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowershell(script))
 	cmd.Env = CleanEnv()
-	detach(cmd)
+	hideConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	msg := strings.TrimSpace(string(out))
 	if err != nil {
@@ -279,7 +279,7 @@ func UiaLogin(login, password string, timeoutSec int) (code, winpid int, out str
 	script := strings.Replace(uiaLoginScript, "{{TIMEOUT}}", strconv.Itoa(timeoutSec), 1)
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowershell(script))
 	cmd.Env = append(CleanEnv(), "AC_IMPORT_LOGIN="+login, "AC_IMPORT_PASS="+password)
-	detach(cmd)
+	hideConsole(cmd)
 	raw, err := cmd.CombinedOutput()
 	msg := strings.TrimSpace(string(raw))
 	winpid = parseWinpid(msg)

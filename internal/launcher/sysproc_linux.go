@@ -12,6 +12,10 @@ func detach(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
+func hideConsole(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+}
+
 func makeDirLink(link, target string) error {
 	return os.Symlink(target, link)
 }
@@ -22,6 +26,7 @@ func javaCandidates(cristalix string) []string {
 		sort.Strings(m)
 		out = append(out, m...)
 	}
+	out = append(out, filepath.Join(cristalix, "runtime", "bin", "java"))
 	if jh := os.Getenv("JAVA_HOME"); jh != "" {
 		out = append(out, filepath.Join(jh, "bin", "java"))
 	}
@@ -29,7 +34,6 @@ func javaCandidates(cristalix string) []string {
 		out = append(out, p)
 	}
 	out = append(out,
-		filepath.Join(cristalix, "runtime", "bin", "java"),
 		"/usr/lib/jvm/default-java/bin/java",
 		"/usr/lib/jvm/default/bin/java",
 	)

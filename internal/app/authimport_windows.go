@@ -20,17 +20,17 @@ func killProcessTree(pid int) {
 	for _, p := range launcher.ProcessTreePids(uint32(pid)) {
 		cmd := exec.Command("taskkill", "/F", "/PID", strconv.Itoa(int(p)))
 		cmd.Env = launcher.CleanEnv()
-		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: launcher.CreateNoWindow}
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: launcher.CreateNoWindow}
 		_ = cmd.Run()
 	}
 }
 
-func startJarProc(java, jar string) (*os.Process, error) {
-	if _, err := os.Stat(jar); err != nil {
+func startExeProc(exe string) (*os.Process, error) {
+	if _, err := os.Stat(exe); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(java, "-jar", jar)
-	cmd.Dir = filepath.Dir(jar)
+	cmd := exec.Command(exe)
+	cmd.Dir = filepath.Dir(exe)
 	cmd.Env = launcher.CleanEnv()
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: launcher.CreateNoWindow}
 	if err := cmd.Start(); err != nil {
@@ -39,18 +39,22 @@ func startJarProc(java, jar string) (*os.Process, error) {
 	return cmd.Process, nil
 }
 
+func launcherWindowPid(rootPid int) uint32 {
+	for _, p := range launcher.ProcessTreePids(uint32(rootPid)) {
+		if platform.WindowForPid(p) != 0 {
+			return p
+		}
+	}
+	return 0
+}
+
 func (s *Server) ensureImportLauncher(prepare func(), forceFresh bool) error {
 	s.importMu.Lock()
 	proc := s.importProc
 	s.importMu.Unlock()
-	if !forceFresh && proc != nil && platform.WindowForPid(uint32(proc.Pid)) != 0 {
+	if !forceFresh && proc != nil && launcherWindowPid(proc.Pid) != 0 {
 		s.importLog("launcher: reusing running instance (pid %d)", proc.Pid)
 		return nil
-	}
-	java, ok := launcher.UsableJava(s.paths.Cristalix)
-	if !ok {
-		s.importLog("launcher: no suitable Java found (need 11+); refusing to start jar")
-		return errors.New("не найдена подходящая Java для лаунчера - запусти клиент Cristalix хотя бы раз (он скачает свою Java), затем повтори импорт")
 	}
 	if proc != nil {
 		s.importLog("launcher: previous instance gone, restarting")
@@ -68,12 +72,13 @@ func (s *Server) ensureImportLauncher(prepare func(), forceFresh bool) error {
 	}
 
 	platform.ClearStaleLocks(s.paths.Cristalix)
-	if err := launcher.EnsureLauncherFrom(s.paths.LauncherJar, launcher.JarLauncherURL); err != nil {
-		s.importLog("launcher: ensure jar failed: %v", err)
+	exe := s.paths.StaffLauncherExe
+	if err := launcher.EnsureLauncherFrom(exe, launcher.StaffLauncherURL); err != nil {
+		s.importLog("launcher: ensure exe failed: %v", err)
 		return errors.New("не удалось подготовить лаунчер: " + err.Error())
 	}
-	s.importLog("launcher: starting jar (java=%s)", java)
-	newProc, err := startJarProc(java, s.paths.LauncherJar)
+	s.importLog("launcher: starting exe=%s (self-contained, без внешней Java)", exe)
+	newProc, err := startExeProc(exe)
 	if err != nil {
 		s.importLog("launcher: start failed: %v", err)
 		return errors.New("не удалось запустить лаунчер: " + err.Error())
@@ -81,21 +86,22 @@ func (s *Server) ensureImportLauncher(prepare func(), forceFresh bool) error {
 	s.importMu.Lock()
 	s.importProc = newProc
 	s.importMu.Unlock()
+	s.importLog("launcher: bootstrap pid=%d, жду окно (по дереву процессов, до 120с)", newProc.Pid)
 
 	deadline := time.Now().Add(120 * time.Second)
-	appeared := false
+	var winPid uint32
 	for time.Now().Before(deadline) {
 		if s.importCanceled() {
 			return errors.New("отменено")
 		}
-		if platform.WindowForPid(uint32(newProc.Pid)) != 0 {
-			appeared = true
+		if winPid = launcherWindowPid(newProc.Pid); winPid != 0 {
 			break
 		}
 		time.Sleep(400 * time.Millisecond)
 	}
-	if !appeared {
-		s.importLog("launcher: window did not appear within 120s (pid %d)", newProc.Pid)
+	if winPid == 0 {
+		tree := launcher.ProcessTreePids(uint32(newProc.Pid))
+		s.importLog("launcher: окно НЕ появилось за 120с (bootstrap pid=%d, процессов в дереве=%d) — возможно, лаунчер без JavaFX или упал", newProc.Pid, len(tree))
 		_ = newProc.Kill()
 		s.importMu.Lock()
 		if s.importProc == newProc {
@@ -104,7 +110,11 @@ func (s *Server) ensureImportLauncher(prepare func(), forceFresh bool) error {
 		s.importMu.Unlock()
 		return errors.New("окно лаунчера не появилось")
 	}
-	s.importLog("launcher: window appeared (pid %d), waiting to settle", newProc.Pid)
+	if winPid == uint32(newProc.Pid) {
+		s.importLog("launcher: окно на самом bootstrap pid=%d", winPid)
+	} else {
+		s.importLog("launcher: окно на ДОЧЕРНЕМ процессе pid=%d (bootstrap=%d)", winPid, newProc.Pid)
+	}
 	time.Sleep(300 * time.Millisecond)
 	return nil
 }
@@ -137,8 +147,11 @@ func (s *Server) importOneReuse(login, password string) (name string, usedPlay b
 		case 1:
 			return "", false, winpid, errors.New("окно входа не найдено (форма авторизации не появилась)")
 		case 2:
-			return "", false, winpid, errors.New("не удалось сфокусироваться на окне лаунчера")
+			return "", false, winpid, errors.New("не удалось вывести окно лаунчера на передний план — возможно, он запущен от имени администратора. Запусти AccountChanger тоже от администратора и повтори.")
 		case 3:
+			if strings.Contains(out, "SendWait") || strings.Contains(strings.ToLower(out), "denied") {
+				return "", false, winpid, errors.New("не удалось ввести данные — похоже, лаунчер запущен от имени администратора, а AccountChanger нет. Запусти AccountChanger тоже от администратора и повтори.")
+			}
 			return "", false, winpid, errors.New("ошибка ввода логина/пароля")
 		case 4:
 			return "", false, winpid, errors.New("неправильный логин или пароль")

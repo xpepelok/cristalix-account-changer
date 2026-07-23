@@ -629,6 +629,19 @@ document.getElementById('toggle-autoplay').addEventListener('click', async () =>
   }
 })
 
+document.getElementById('toggle-aggressive').addEventListener('click', async () => {
+  const next = !document.getElementById('toggle-aggressive').classList.contains('on')
+  setToggle('toggle-aggressive', next)
+  try {
+    const r = await apiPost('/api/settings/aggressive', { enabled: next })
+    setToggle('toggle-aggressive', !!r.aggressive)
+    toast(next ? 'Агрессивный запуск включён' : 'Агрессивный запуск выключен')
+  } catch (e) {
+    setToggle('toggle-aggressive', !next)
+    toast(e.message, true)
+  }
+})
+
 document.getElementById('toggle-stats').addEventListener('click', async () => {
   const next = !document.getElementById('toggle-stats').classList.contains('on')
   setToggle('toggle-stats', next)

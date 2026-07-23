@@ -130,19 +130,23 @@
         </div>
       </div>
 
-      <div id="grid" class="accounts-grid"></div>
-      <div id="group-empty" class="group-empty" hidden>
-        <div class="group-empty-text">В этой группе пока нет аккаунтов</div>
-        <button class="group-add-center" id="group-add-center" title="Добавить аккаунты" aria-label="Добавить аккаунты">
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 6v12M6 12h12" /></svg>
-        </button>
-      </div>
-      <div id="empty" class="state" hidden>
-        Пока пусто. Зайди на любой аккаунт через лаунчер - токен сохранится сюда сам.
+      <div class="acc-scroll">
+        <div id="grid" class="accounts-grid"></div>
+        <div id="group-empty" class="group-empty" hidden>
+          <div class="group-empty-text">В этой группе пока нет аккаунтов</div>
+          <button class="group-add-center" id="group-add-center" title="Добавить аккаунты" aria-label="Добавить аккаунты">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 6v12M6 12h12" /></svg>
+          </button>
+        </div>
+        <div id="empty" class="state" hidden>
+          Пока пусто. Зайди на любой аккаунт через лаунчер - токен сохранится сюда сам.
+        </div>
       </div>
 
 <!--      <div class="footer">with love from <a class="footer-name" id="footer-link" href="https://github.com/xpepelok">xpepelok</a> <span class="footer-heart">♥</span></div>-->
       <div class="footer">with love from <a class="footer-name" id="footer-link" href="https://top.cristalix.gg/profile/Pepel_ok">xpepelok</a> <span class="footer-heart">♥</span></div>
+
+    <button class="tg-fab" id="tg-link" data-tip="Dev-блог разработчика" aria-label="Dev-блог разработчика"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg></button>
     </div>
 
     <div class="overlay" id="overlay" hidden>
@@ -339,6 +343,15 @@
           </div>
           <div class="setting-row">
             <div class="setting-info">
+              <div class="setting-label">Агрессивный запуск</div>
+              <div class="setting-desc">Запускать аккаунты массово. Может сильно нагружать ваш ПК в момент запуска.</div>
+            </div>
+            <button class="toggle" id="toggle-aggressive" role="switch" aria-checked="false">
+              <span class="toggle-knob"></span>
+            </button>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
               <div class="setting-label">Отправка метрик</div>
               <div class="setting-desc">Синронизация такой информации, как онлайн. Если выключить - актуальный онлайн виден не будет.</div>
             </div>
@@ -526,10 +539,6 @@
         </div>
       </div>
     </div>
-
-    <button class="tg-fab" id="tg-link" data-tip="Dev-блог разработчика" aria-label="Dev-блог разработчика">
-      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
-    </button>
 
     <div id="queue-dd" hidden>
       <button class="acc-fab queue-fab" id="queue-btn" title="Очередь запускаемых аккаунтов" aria-label="Очередь запускаемых аккаунтов">

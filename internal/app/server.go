@@ -198,6 +198,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/settings/launcher", s.handleSettingsLauncher)
 	mux.HandleFunc("/api/settings/custom-launcher", s.handleSettingsCustomLauncher)
 	mux.HandleFunc("/api/settings/autoplay", s.handleSettingsAutoPlay)
+	mux.HandleFunc("/api/settings/aggressive", s.handleSettingsAggressive)
 	mux.HandleFunc("/api/settings/stats", s.handleSettingsStats)
 	mux.HandleFunc("/api/stats", s.handleStats)
 	mux.HandleFunc("/api/logs", s.handleLogs)

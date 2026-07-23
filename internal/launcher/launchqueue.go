@@ -5,6 +5,7 @@ import (
 	"accountchanger/internal/platform"
 	"accountchanger/internal/player"
 	"accountchanger/internal/vault"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -191,6 +192,7 @@ func (q *LaunchQueue) launchExe(uuid, name, client, exe, url string, before []ui
 		return false, nil
 	}
 	home := q.instanceHome(uuid, client)
+	q.launchLog("'%s': exe-лаунчер, exe=%s, home=%s", name, exe, home)
 	var launcherPID uint32
 	err := StartLauncherLogged(exe, home, uuid, name, nil, func(p *os.Process) {
 		q.track(uuid, p)
@@ -199,11 +201,13 @@ func (q *LaunchQueue) launchExe(uuid, name, client, exe, url string, before []ui
 		}
 	}, nil)
 	if err != nil {
+		q.launchLog("'%s': запуск exe-лаунчера НЕ УДАЛСЯ: %v", name, err)
 		if q.logs != nil {
 			q.logs.unsupported(uuid, name, "[AccountChanger] Не удалось запустить лаунчер: "+err.Error())
 		}
 		return false, nil
 	}
+	q.launchLog("'%s': exe-лаунчер запущен, bootstrap pid=%d", name, launcherPID)
 	return true, q.tailGame(uuid, name, client, before, launcherPID)
 }
 
@@ -211,14 +215,20 @@ func (q *LaunchQueue) tailGame(uuid, name, client string, before []uint32, launc
 	ready := make(chan bool, 1)
 	go TailGameLog(q.paths.Updates, client, uuid, name, q.logs, func(ok bool) {
 		if ok {
+			q.launchLog("'%s': игровой лог найден (клиент запускается)", name)
 			go func() {
-				if q.tracker.bindVerifiedLauncher(uuid, launcherPID) == 0 {
-					q.tracker.bindGame(uuid, before)
+				gpid := q.tracker.bindVerifiedLauncher(uuid, launcherPID)
+				if gpid == 0 {
+					gpid = q.tracker.bindGame(uuid, before)
 				}
+				q.launchLog("'%s': игра привязана, game pid=%d (по launcherPID=%d)", name, gpid, launcherPID)
 				q.wipeInstanceToken(uuid)
 				q.finishLogWhenGameCloses(uuid)
+				q.launchLog("'%s': игра закрыта, инстанс очищен", name)
 				q.removeInstanceDir(uuid)
 			}()
+		} else {
+			q.launchLog("'%s': игровой лог НЕ найден в отведённое время", name)
 		}
 		ready <- ok
 	})
@@ -249,8 +259,24 @@ func (q *LaunchQueue) instanceHome(uuid, client string) string {
 			effective = CurrentClient(q.paths.LauncherCfg)
 		}
 		_ = ApplyAccount(cfg, acc.Name, acc.Token, effective, AccountLaunchOpts(acc))
+		q.launchLog("instance '%s': токен записан в %s (client=%s, ram=%d, minimal=%v)", acc.Name, cfg, effective, AccountLaunchOpts(acc).Ram, acc.Minimal)
 	}
 	return home
+}
+
+func (q *LaunchQueue) launchLog(format string, args ...any) {
+	line := fmt.Sprintf("["+time.Now().Format("15:04:05")+"] "+format+"\n", args...)
+	f, err := os.OpenFile(filepath.Join(q.paths.Data, "launch.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(line)
+}
+
+func dirExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.IsDir()
 }
 
 func (q *LaunchQueue) instanceDir(uuid string) string {
@@ -286,8 +312,10 @@ func (q *LaunchQueue) cleanStaleInstances() {
 func (q *LaunchQueue) launchJar(uuid, name, client string, before []uint32) (bool, <-chan bool) {
 	home := q.instanceHome(uuid, client)
 	java := ResolveJava(q.paths.Cristalix)
+	q.launchLog("'%s': jar-лаунчер, java=%s, jar=%s, home=%s", name, java, q.paths.LauncherJar, home)
 	var launcherPID uint32
 	err := StartLauncherJar(java, q.paths.LauncherJar, home, func() {
+		q.launchLog("'%s': jar битый/не запустился, фолбэк на staff exe", name)
 		if EnsureLauncherFrom(q.paths.StaffLauncherExe, StaffLauncherURL) != nil {
 			return
 		}
@@ -301,11 +329,13 @@ func (q *LaunchQueue) launchJar(uuid, name, client string, before []uint32) (boo
 		}
 	})
 	if err != nil {
+		q.launchLog("'%s': запуск jar-лаунчера НЕ УДАЛСЯ: %v", name, err)
 		if q.logs != nil {
 			q.logs.unsupported(uuid, name, "[AccountChanger] Не удалось запустить лаунчер: "+err.Error())
 		}
 		return false, nil
 	}
+	q.launchLog("'%s': jar-лаунчер запущен, bootstrap pid=%d", name, launcherPID)
 	return true, q.tailGame(uuid, name, client, before, launcherPID)
 }
 
@@ -357,9 +387,12 @@ func (q *LaunchQueue) launchFor(uuid, name, client string, before []uint32) (boo
 func (q *LaunchQueue) run(uuid, client string) {
 	acc, ok := q.vault.Get(uuid)
 	if !ok || acc.Name == "" || acc.Token == "" {
+		q.launchLog("run %s: пропуск — нет аккаунта или токена (ok=%v)", shortUUID(uuid), ok)
 		return
 	}
+	q.launchLog("=== запуск '%s' (client=%s, launcher=%s, aggressive=%v, autoPlay=%v) ===", acc.Name, client, q.cfg.Launcher(), q.cfg.AggressiveLaunch(), q.cfg.AutoPlay())
 	if running, _ := q.tracker.Resolve(); running[uuid] != 0 {
+		q.launchLog("'%s': уже запущен, пропуск", acc.Name)
 		return
 	}
 	if client != "" {
@@ -381,25 +414,33 @@ func (q *LaunchQueue) run(uuid, client string) {
 	if effective != "" {
 		updates := UpdatesDir(q.paths.LauncherCfg, q.paths.Updates)
 		clientDir := filepath.Join(updates, effective)
+		q.launchLog("'%s': настройки — updates=%s, clientDir=%s (существует=%v)", acc.Name, updates, clientDir, dirExists(clientDir))
 		if acc.Profile != "" && acc.Profile != MinimalProfileName {
 			applyProfile(q.paths.Profiles, acc.Profile, clientDir)
+			q.launchLog("'%s': профиль '%s' скопирован в %s", acc.Name, acc.Profile, clientDir)
 			if launchIsStaff(acc.Name) {
 				applyProfile(q.paths.Profiles, acc.Profile, filepath.Join(updates, stagingClient))
 			}
 		}
 		if acc.Minimal || acc.Profile == MinimalProfileName {
 			applyMinimalOptionsAll(updates)
+			q.launchLog("'%s': минимальные настройки применены к клиентам: %v", acc.Name, ListClients(updates))
 		} else {
 			applyClientOptionsAll(updates, acc)
+			q.launchLog("'%s': клиентские настройки (chunks=%d,fps=%d,anim=%d,fastRender=%d) применены к: %v", acc.Name, acc.RenderDistance, acc.MaxFps, acc.Animations, acc.FastRender, ListClients(updates))
 		}
+	} else {
+		q.launchLog("'%s': effective client ПУСТ — настройки НЕ применяются", acc.Name)
 	}
 	before := gameWindowPids()
 	launched, _, _ := q.launchFor(uuid, acc.Name, effective, before)
 	if !launched {
+		q.launchLog("'%s': лаунчер НЕ запустился", acc.Name)
 		return
 	}
 	q.vault.MarkLaunched(uuid)
 	if q.cfg.AutoPlay() {
+		q.launchLog("'%s': жму ИГРАТЬ (автозапуск)", acc.Name)
 		go q.autoPlay(uuid)
 	}
 	q.procMu.Lock()
@@ -410,11 +451,18 @@ func (q *LaunchQueue) run(uuid, client string) {
 	}
 	q.procMu.Unlock()
 	beforeCopy := append([]uint32(nil), before...)
-	go func() {
+	bind := func() {
 		if launcherPID == 0 || q.tracker.bindVerifiedLauncher(uuid, launcherPID) == 0 {
 			q.tracker.bindGame(uuid, beforeCopy)
 		}
-	}()
+	}
+	if q.cfg.AggressiveLaunch() {
+		go bind()
+	} else {
+		q.launchLog("'%s': обычный режим — ждём поднятия игры перед следующим", acc.Name)
+		bind()
+		q.launchLog("'%s': игра поднялась, можно запускать следующий", acc.Name)
+	}
 }
 
 func (q *LaunchQueue) autoPlay(uuid string) {
@@ -499,6 +547,7 @@ func (q *LaunchQueue) LaunchGroup(members []string, groupProfile string) {
 		q.mu.Unlock()
 		return
 	}
+	q.launchLog("=== ГРУППА: запуск %d аккаунтов (profile=%q, aggressive=%v) ===", len(members), groupProfile, q.cfg.AggressiveLaunch())
 	q.groupActive = true
 	q.groupPaused = false
 	q.groupCancelled = false
@@ -517,6 +566,7 @@ func (q *LaunchQueue) LaunchGroup(members []string, groupProfile string) {
 	}()
 
 	applied := map[string]bool{}
+	autoPlayStarted := false
 	groupHasStaff := false
 	for _, uuid := range members {
 		if a, ok := q.vault.Get(uuid); ok && a.Name != "" && launchIsStaff(a.Name) {
@@ -579,14 +629,17 @@ func (q *LaunchQueue) LaunchGroup(members []string, groupProfile string) {
 				applyClientOptionsAll(updates, acc)
 			}
 			q.tracker.noteLaunch(uuid)
+			q.launchLog("группа: запускаю '%s' (client=%s)", acc.Name, effective)
 			before := gameWindowPids()
 			launched, _, _ := q.launchFor(uuid, acc.Name, effective, before)
 			if !launched {
+				q.launchLog("группа: '%s' — лаунчер не запустился", acc.Name)
 				q.recordGroupSkip(acc.Name, "лаунчер не запустился")
 				return
 			}
 			q.vault.MarkLaunched(uuid)
-			if q.cfg.AutoPlay() {
+			if q.cfg.AutoPlay() && !autoPlayStarted {
+				autoPlayStarted = true
 				go q.autoPlay(uuid)
 			}
 			q.procMu.Lock()
@@ -597,11 +650,16 @@ func (q *LaunchQueue) LaunchGroup(members []string, groupProfile string) {
 			}
 			q.procMu.Unlock()
 			beforeCopy := append([]uint32(nil), before...)
-			go func() {
+			bind := func() {
 				if launcherPID == 0 || q.tracker.bindVerifiedLauncher(uuid, launcherPID) == 0 {
 					q.tracker.bindGame(uuid, beforeCopy)
 				}
-			}()
+			}
+			if q.cfg.AggressiveLaunch() {
+				go bind()
+			} else {
+				bind()
+			}
 		}()
 	}
 }

@@ -135,6 +135,7 @@ async function openSettings() {
     const s = await apiGet('/api/settings')
     setToggle('toggle-autostart', !!s.autostart)
     setToggle('toggle-autoplay', s.autoPlay !== false)
+    setToggle('toggle-aggressive', !!s.aggressive)
     setToggle('toggle-stats', s.stats !== false)
     customLauncherPath = s.customLauncher || ''
     updateCustomPathUI()

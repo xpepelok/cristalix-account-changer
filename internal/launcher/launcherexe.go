@@ -171,7 +171,7 @@ func UsableJava(cristalix string) (java string, ok bool) {
 
 func javaMajor(javaPath string) int {
 	cmd := exec.Command(javaPath, "-version")
-	detach(cmd)
+	hideConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return 0
