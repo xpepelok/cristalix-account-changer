@@ -77,7 +77,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [windows, linux]
+    needs: [guard, windows, linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
