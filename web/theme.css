@@ -675,6 +675,16 @@ a {
   transform: translateY(-2px);
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.28), -10px 0 26px -18px var(--grp, transparent);
 }
+.expired-mark {
+  flex: none;
+  display: flex;
+  align-items: center;
+  color: var(--yellow);
+  opacity: 0.85;
+}
+.acc-card:hover .expired-mark {
+  opacity: 1;
+}
 
 .acc-title {
   display: flex;
@@ -916,6 +926,10 @@ a {
   align-items: center;
   gap: 7px;
   margin-top: 4px;
+  min-width: 0;
+}
+.acc-meta .acc-sub {
+  flex: none;
 }
 .badge {
   font-size: 0.6rem;
@@ -936,6 +950,23 @@ a {
 .badge.notoken {
   color: var(--faint);
   background: var(--surface-2);
+}
+.badge.status {
+  min-width: 0;
+  text-transform: none;
+  letter-spacing: 0.2px;
+  font-size: 0.66rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.badge.status.on {
+  color: var(--green);
+  background: rgba(31, 163, 68, 0.14);
+}
+.badge.status.off {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 16%, transparent);
 }
 .acc-sub {
   color: var(--faint);
@@ -3270,29 +3301,48 @@ a {
   100% { transform: translateY(0) scale(1); }
 }
 .settings-modal {
-  width: 460px;
+  width: 420px;
   max-width: 92vw;
-  padding-bottom: 18px;
+  padding-bottom: 14px;
 }
 .settings-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 18px 20px 20px;
+  gap: 14px;
+  padding: 6px 18px 16px;
 }
-.setting-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 16px;
+.settings-modal .profiles-head {
+  padding: 16px 18px 12px;
+}
+.settings-modal .ph-title {
+  font-size: 1.05rem;
+}
+.settings-section-title {
+  padding: 0 2px 6px;
+  color: var(--faint);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+.settings-card {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface-2);
 }
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+}
+.setting-row + .setting-row {
+  border-top: 1px solid var(--line);
+}
 .setting-row.setting-col {
   flex-direction: column;
   align-items: stretch;
-  gap: 12px;
+  gap: 9px;
 }
 .launcher-dd {
   position: relative;
@@ -3319,7 +3369,7 @@ a {
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  padding: 10px 12px;
+  padding: 8px 11px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -3386,20 +3436,20 @@ a {
   min-width: 0;
 }
 .setting-label {
-  font-weight: 700;
-  font-size: 0.92rem;
+  font-weight: 600;
+  font-size: 0.85rem;
 }
 .setting-desc {
   color: var(--muted);
-  font-size: 0.76rem;
-  margin-top: 3px;
-  line-height: 1.4;
+  font-size: 0.72rem;
+  margin-top: 2px;
+  line-height: 1.35;
 }
 .toggle {
   flex: none;
   position: relative;
-  width: 46px;
-  height: 26px;
+  width: 38px;
+  height: 22px;
   border: 0;
   border-radius: 999px;
   background: var(--line-strong);
@@ -3414,15 +3464,15 @@ a {
   position: absolute;
   top: 3px;
   left: 3px;
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   transition: transform 0.18s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 .toggle.on .toggle-knob {
-  transform: translateX(20px);
+  transform: translateX(16px);
 }
 
 .filter-dd {

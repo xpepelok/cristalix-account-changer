@@ -45,6 +45,14 @@ func (p procInfo) isGame() bool {
 	return strings.Contains(p.cmdline, "minecraft.jar") || strings.Contains(p.cmdline, "net.minecraft.client")
 }
 
+func gameLivePids() map[uint32]bool {
+	out := map[uint32]bool{}
+	for _, pid := range gameWindowPids() {
+		out[pid] = true
+	}
+	return out
+}
+
 func javaProcessPids() map[uint32]bool {
 	out := map[uint32]bool{}
 	for _, p := range scanProcs(true) {

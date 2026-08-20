@@ -13,8 +13,11 @@ type launchRec struct {
 	UUID   string    `json:"uuid"`
 	At     time.Time `json:"at"`
 	Pid    uint32    `json:"pid"`
+	Seen   time.Time `json:"seen,omitempty"`
 	Before []uint32  `json:"before,omitempty"`
 }
+
+const windowGrace = 20 * time.Second
 
 type GameTracker struct {
 	mu       sync.Mutex
@@ -160,12 +163,13 @@ func (t *GameTracker) bindGame(uuid string, before []uint32) uint32 {
 				if t.launched[i].UUID == uuid {
 					t.launched[i].Pid = found
 					t.launched[i].At = time.Now()
+					t.launched[i].Seen = time.Now()
 					set = true
 					break
 				}
 			}
 			if !set {
-				t.launched = append(t.launched, launchRec{UUID: uuid, At: time.Now(), Pid: found})
+				t.launched = append(t.launched, launchRec{UUID: uuid, At: time.Now(), Seen: time.Now(), Pid: found})
 			}
 			t.persist()
 			t.mu.Unlock()
@@ -192,6 +196,7 @@ func (t *GameTracker) bindVerifiedLauncher(uuid string, launcherPID uint32) uint
 				if t.launched[i].UUID == uuid {
 					t.launched[i].Pid = pid
 					t.launched[i].At = time.Now()
+					t.launched[i].Seen = time.Now()
 					t.persist()
 					t.mu.Unlock()
 					return pid
@@ -208,7 +213,9 @@ func (t *GameTracker) bindVerifiedLauncher(uuid string, launcherPID uint32) uint
 
 func (t *GameTracker) Resolve() (map[string]uint32, map[string]bool) {
 	pids := gameWindowPids()
+	live := gameLivePids()
 	alive := javaProcessPids()
+	now := time.Now()
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -221,13 +228,29 @@ func (t *GameTracker) Resolve() (map[string]uint32, map[string]bool) {
 
 	for i := range t.launched {
 		r := &t.launched[i]
-		if r.Pid != 0 && alive[r.Pid] && !claimed[r.Pid] {
+		if r.Pid == 0 || claimed[r.Pid] {
+			if r.Pid != 0 {
+				r.Pid = 0
+				changed = true
+			}
+			continue
+		}
+		if live[r.Pid] {
+			if now.Sub(r.Seen) > 30*time.Second {
+				changed = true
+			}
+			r.Seen = now
 			claimed[r.Pid] = true
 			running[r.UUID] = r.Pid
-		} else if r.Pid != 0 {
-			r.Pid = 0
-			changed = true
+			continue
 		}
+		if alive[r.Pid] && !r.Seen.IsZero() && now.Sub(r.Seen) < windowGrace {
+			claimed[r.Pid] = true
+			running[r.UUID] = r.Pid
+			continue
+		}
+		r.Pid = 0
+		changed = true
 	}
 
 	var free []uint32
@@ -252,6 +275,7 @@ func (t *GameTracker) Resolve() (map[string]uint32, map[string]bool) {
 				continue
 			}
 			r.Pid = p
+			r.Seen = now
 			claimed[p] = true
 			running[r.UUID] = p
 			changed = true

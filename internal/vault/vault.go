@@ -33,6 +33,7 @@ type Account struct {
 	FirstSeen      int64  `json:"firstSeen"`
 	LastSeen       int64  `json:"lastSeen"`
 	LastLaunched   int64  `json:"lastLaunched"`
+	LastOnline     int64  `json:"lastOnline"`
 }
 
 type LaunchOpts struct {
@@ -59,8 +60,9 @@ type Group struct {
 }
 
 type Vault struct {
-	mu        sync.Mutex
-	path      string
+	mu          sync.Mutex
+	path        string
+	onlineFlush int64
 	Accounts  map[string]*Account `json:"accounts"`
 	Forgotten map[string]string   `json:"forgotten"`
 	Groups    []*Group            `json:"groups"`
@@ -226,6 +228,26 @@ func (v *Vault) MarkLaunched(uuid string) {
 	defer v.mu.Unlock()
 	if acc, ok := v.Accounts[uuid]; ok {
 		acc.LastLaunched = time.Now().Unix()
+		_ = v.persist()
+	}
+}
+
+func (v *Vault) TouchOnline(uuids []string) {
+	if len(uuids) == 0 {
+		return
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	now := time.Now().Unix()
+	touched := false
+	for _, uuid := range uuids {
+		if acc, ok := v.Accounts[uuid]; ok {
+			acc.LastOnline = now
+			touched = true
+		}
+	}
+	if touched && now-v.onlineFlush >= 60 {
+		v.onlineFlush = now
 		_ = v.persist()
 	}
 }

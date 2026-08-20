@@ -439,10 +439,6 @@ func (q *LaunchQueue) run(uuid, client string) {
 		return
 	}
 	q.vault.MarkLaunched(uuid)
-	if q.cfg.AutoPlay() {
-		q.launchLog("'%s': жму ИГРАТЬ (автозапуск)", acc.Name)
-		go q.autoPlay(uuid)
-	}
 	q.procMu.Lock()
 	var launcherPID uint32
 	if lp := q.procs[uuid]; lp != nil {
@@ -451,22 +447,39 @@ func (q *LaunchQueue) run(uuid, client string) {
 	}
 	q.procMu.Unlock()
 	beforeCopy := append([]uint32(nil), before...)
-	bind := func() {
-		if launcherPID == 0 || q.tracker.bindVerifiedLauncher(uuid, launcherPID) == 0 {
-			q.tracker.bindGame(uuid, beforeCopy)
+	bind := func() uint32 {
+		if launcherPID != 0 {
+			if pid := q.tracker.bindVerifiedLauncher(uuid, launcherPID); pid != 0 {
+				return pid
+			}
 		}
+		return q.tracker.bindGame(uuid, beforeCopy)
 	}
 	if q.cfg.AggressiveLaunch() {
-		go bind()
+		go func() {
+			pid := bind()
+			kickTitles()
+			q.autoPlay(acc.Name, pid)
+		}()
 	} else {
 		q.launchLog("'%s': обычный режим — ждём поднятия игры перед следующим", acc.Name)
-		bind()
+		pid := bind()
+		kickTitles()
+		go q.autoPlay(acc.Name, pid)
 		q.launchLog("'%s': игра поднялась, можно запускать следующий", acc.Name)
 	}
 }
 
-func (q *LaunchQueue) autoPlay(uuid string) {
-	clickPlayButton(autoPlayTimeout)
+func (q *LaunchQueue) autoPlay(name string, pid uint32) {
+	if !q.cfg.AutoPlay() {
+		return
+	}
+	if pid == 0 {
+		q.launchLog("'%s': окно клиента не найдено, ИГРАТЬ не жму", name)
+		return
+	}
+	q.launchLog("'%s': жму ИГРАТЬ (автозапуск)", name)
+	ClickPlayButtonForPid(int(pid), autoPlayTimeout)
 }
 
 func (q *LaunchQueue) PauseGroup() bool {
@@ -566,7 +579,6 @@ func (q *LaunchQueue) LaunchGroup(members []string, groupProfile string) {
 	}()
 
 	applied := map[string]bool{}
-	autoPlayStarted := false
 	groupHasStaff := false
 	for _, uuid := range members {
 		if a, ok := q.vault.Get(uuid); ok && a.Name != "" && launchIsStaff(a.Name) {
@@ -638,10 +650,6 @@ func (q *LaunchQueue) LaunchGroup(members []string, groupProfile string) {
 				return
 			}
 			q.vault.MarkLaunched(uuid)
-			if q.cfg.AutoPlay() && !autoPlayStarted {
-				autoPlayStarted = true
-				go q.autoPlay(uuid)
-			}
 			q.procMu.Lock()
 			var launcherPID uint32
 			if lp := q.procs[uuid]; lp != nil {
@@ -650,15 +658,24 @@ func (q *LaunchQueue) LaunchGroup(members []string, groupProfile string) {
 			}
 			q.procMu.Unlock()
 			beforeCopy := append([]uint32(nil), before...)
-			bind := func() {
-				if launcherPID == 0 || q.tracker.bindVerifiedLauncher(uuid, launcherPID) == 0 {
-					q.tracker.bindGame(uuid, beforeCopy)
+			bind := func() uint32 {
+				if launcherPID != 0 {
+					if pid := q.tracker.bindVerifiedLauncher(uuid, launcherPID); pid != 0 {
+						return pid
+					}
 				}
+				return q.tracker.bindGame(uuid, beforeCopy)
 			}
 			if q.cfg.AggressiveLaunch() {
-				go bind()
+				go func() {
+					pid := bind()
+					kickTitles()
+					q.autoPlay(acc.Name, pid)
+				}()
 			} else {
-				bind()
+				pid := bind()
+				kickTitles()
+				go q.autoPlay(acc.Name, pid)
 			}
 		}()
 	}

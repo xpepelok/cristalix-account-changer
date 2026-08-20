@@ -5,6 +5,7 @@ import (
 	"accountchanger/internal/config"
 	"accountchanger/internal/launcher"
 	"accountchanger/internal/platform"
+	"accountchanger/internal/player"
 	"accountchanger/internal/stats"
 	"accountchanger/internal/update"
 	"accountchanger/internal/vault"
@@ -69,6 +70,7 @@ func main() {
 	launcher.ClearWebCache(paths.WebProfile)
 
 	vaultStore := vault.OpenVault(paths.Vault)
+	player.OpenCache(paths.Players)
 	cfg := config.OpenConfig(paths.Config)
 	if !app.LauncherAllowed(cfg.Launcher()) {
 		cfg.SetLauncher(config.LauncherJar)
@@ -76,6 +78,15 @@ func main() {
 	go stats.Loop(paths, cfg)
 	watcher := &launcher.Watcher{Paths: paths, Vault: vaultStore}
 	tracker := launcher.NewGameTracker(paths.Session)
+	if cfg.WindowTitle() {
+		names := make([]string, 0)
+		for _, acc := range vaultStore.List() {
+			if acc.Name != "" {
+				names = append(names, acc.Name)
+			}
+		}
+		launcher.AllowGameTitles(names)
+	}
 	launcher.SeedTracker(tracker, vaultStore)
 	logs := launcher.NewLogStore(paths.Logs)
 
@@ -83,6 +94,16 @@ func main() {
 		_ = launcher.EnsureLauncherFrom(paths.LauncherJar, launcher.JarLauncherURL)
 	}()
 	go watcher.Run()
+	go player.RefreshLoop(func() []string {
+		names := make([]string, 0)
+		for _, acc := range vaultStore.List() {
+			if acc.Name != "" {
+				names = append(names, acc.Name)
+			}
+		}
+		return names
+	})
+	go launcher.TitleLoop(tracker, vaultStore, cfg)
 
 	srv := app.New(app.Deps{
 		Paths:   paths,
@@ -112,4 +133,5 @@ func main() {
 		srv.Wait()
 	}
 	logs.Flush()
+	player.FlushCache()
 }

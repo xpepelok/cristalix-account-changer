@@ -22,8 +22,7 @@ func gameWindowPids() []uint32 {
 			continue
 		}
 		for _, title := range titles[pid] {
-			low := strings.ToLower(strings.TrimSpace(title))
-			if low == "cristalix" || strings.HasPrefix(low, "cristalix ") {
+			if isGameTitle(title) {
 				pids = append(pids, pid)
 				break
 			}
@@ -31,6 +30,19 @@ func gameWindowPids() []uint32 {
 	}
 	sort.Slice(pids, func(i, j int) bool { return pids[i] < pids[j] })
 	return pids
+}
+
+func gameLivePids() map[uint32]bool {
+	titles := platform.WindowTitlesByPID()
+	javaPids := javaProcessPids()
+	out := map[uint32]bool{}
+	for pid := range titles {
+		if !javaPids[pid] || isLauncherPid(pid) {
+			continue
+		}
+		out[pid] = true
+	}
+	return out
 }
 
 func javaProcessPids() map[uint32]bool {

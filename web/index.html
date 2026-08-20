@@ -292,72 +292,91 @@
           <div class="ph-title">Настройки</div>
         </div>
         <div class="settings-body">
-          <div class="setting-row setting-col">
-            <div class="setting-info">
-              <div class="setting-label">Лаунчер для запуска</div>
-              <div class="setting-desc">Каким лаунчером запускать аккаунты и «Открыть лаунчер»</div>
-            </div>
-            <div class="launcher-dd" id="launcher-dd">
-              <button class="launcher-dd-trigger" id="launcher-dd-trigger" type="button">
-                <span id="launcher-dd-value">JAR-версия лаунчера</span>
-                <svg class="dd-caret" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
-              </button>
-              <div class="launcher-dd-menu" id="launcher-dd-menu" hidden>
-                <button class="launcher-dd-item" data-val="normal" type="button">Обычный лаунчер</button>
-                <button class="launcher-dd-item" data-val="jar" type="button">JAR-версия лаунчера</button>
-                <button class="launcher-dd-item" data-val="new" type="button">Новый лаунчер</button>
-                <button class="launcher-dd-item" data-val="custom" type="button">Свой лаунчер…</button>
+          <div class="settings-section">
+            <div class="settings-section-title">Запуск</div>
+            <div class="settings-card">
+              <div class="setting-row setting-col">
+                <div class="setting-info">
+                  <div class="setting-label">Лаунчер</div>
+                  <div class="setting-desc">Чем запускать аккаунты и «Открыть лаунчер»</div>
+                </div>
+                <div class="launcher-dd" id="launcher-dd">
+                  <button class="launcher-dd-trigger" id="launcher-dd-trigger" type="button">
+                    <span id="launcher-dd-value">JAR-версия лаунчера</span>
+                    <svg class="dd-caret" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                  </button>
+                  <div class="launcher-dd-menu" id="launcher-dd-menu" hidden>
+                    <button class="launcher-dd-item" data-val="normal" type="button">Обычный лаунчер</button>
+                    <button class="launcher-dd-item" data-val="jar" type="button">JAR-версия лаунчера</button>
+                    <button class="launcher-dd-item" data-val="new" type="button">Новый лаунчер</button>
+                    <button class="launcher-dd-item" data-val="custom" type="button">Свой лаунчер…</button>
+                  </div>
+                </div>
+                <div class="custom-launcher-row" id="custom-launcher-row" hidden>
+                  <span class="custom-launcher-path" id="custom-launcher-path" title="">Файл не выбран</span>
+                  <button class="gm-btn" id="custom-launcher-browse" type="button">Обзор</button>
+                </div>
+              </div>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-label">Автозапуск клиента</div>
+                  <div class="setting-desc">Открывать клиент сразу после входа в аккаунт</div>
+                </div>
+                <button class="toggle" id="toggle-autoplay" role="switch" aria-checked="true">
+                  <span class="toggle-knob"></span>
+                </button>
+              </div>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-label">Агрессивный запуск</div>
+                  <div class="setting-desc">Массово, без очереди - сильно грузит ПК</div>
+                </div>
+                <button class="toggle" id="toggle-aggressive" role="switch" aria-checked="false">
+                  <span class="toggle-knob"></span>
+                </button>
+              </div>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-label">Ник в заголовке окна</div>
+                  <div class="setting-desc">Переименовывать окно клиента в ник аккаунта</div>
+                </div>
+                <button class="toggle" id="toggle-window-title" role="switch" aria-checked="false">
+                  <span class="toggle-knob"></span>
+                </button>
               </div>
             </div>
-            <div class="custom-launcher-row" id="custom-launcher-row" hidden>
-              <span class="custom-launcher-path" id="custom-launcher-path" title="">Файл не выбран</span>
-              <button class="gm-btn" id="custom-launcher-browse" type="button">Обзор</button>
-            </div>
           </div>
-          <div class="setting-row">
-            <div class="setting-info">
-              <div class="setting-label">Автозапуск</div>
-              <div class="setting-desc">Запускать AccountChanger при включении Windows</div>
+          <div class="settings-section">
+            <div class="settings-section-title">Приложение</div>
+            <div class="settings-card">
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-label">Автозапуск</div>
+                  <div class="setting-desc">Запускать AccountChanger при включении Windows</div>
+                </div>
+                <button class="toggle" id="toggle-autostart" role="switch" aria-checked="false">
+                  <span class="toggle-knob"></span>
+                </button>
+              </div>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-label">Звуки интерфейса</div>
+                  <div class="setting-desc">Мягкие звуки при нажатии на кнопки</div>
+                </div>
+                <button class="toggle" id="toggle-sound" role="switch" aria-checked="true">
+                  <span class="toggle-knob"></span>
+                </button>
+              </div>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-label">Отправка метрик</div>
+                  <div class="setting-desc">Без неё не виден актуальный онлайн</div>
+                </div>
+                <button class="toggle" id="toggle-stats" role="switch" aria-checked="true">
+                  <span class="toggle-knob"></span>
+                </button>
+              </div>
             </div>
-            <button class="toggle" id="toggle-autostart" role="switch" aria-checked="false">
-              <span class="toggle-knob"></span>
-            </button>
-          </div>
-          <div class="setting-row">
-            <div class="setting-info">
-              <div class="setting-label">Звуки интерфейса</div>
-              <div class="setting-desc">Мягкие звуки при нажатии на кнопки</div>
-            </div>
-            <button class="toggle" id="toggle-sound" role="switch" aria-checked="true">
-              <span class="toggle-knob"></span>
-            </button>
-          </div>
-          <div class="setting-row">
-            <div class="setting-info">
-              <div class="setting-label">Автозапуск клиента</div>
-              <div class="setting-desc">Сразу запускать клиент после инициализации аккаунта</div>
-            </div>
-            <button class="toggle" id="toggle-autoplay" role="switch" aria-checked="true">
-              <span class="toggle-knob"></span>
-            </button>
-          </div>
-          <div class="setting-row">
-            <div class="setting-info">
-              <div class="setting-label">Агрессивный запуск</div>
-              <div class="setting-desc">Запускать аккаунты массово. Может сильно нагружать ваш ПК в момент запуска.</div>
-            </div>
-            <button class="toggle" id="toggle-aggressive" role="switch" aria-checked="false">
-              <span class="toggle-knob"></span>
-            </button>
-          </div>
-          <div class="setting-row">
-            <div class="setting-info">
-              <div class="setting-label">Отправка метрик</div>
-              <div class="setting-desc">Синронизация такой информации, как онлайн. Если выключить - актуальный онлайн виден не будет.</div>
-            </div>
-            <button class="toggle" id="toggle-stats" role="switch" aria-checked="true">
-              <span class="toggle-knob"></span>
-            </button>
           </div>
         </div>
       </div>

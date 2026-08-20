@@ -106,6 +106,7 @@ function applyCaps() {
     setText('win-close', 'title', 'Свернуть — приложение продолжит ловить токены в фоне')
   }
   if (caps.os && caps.os !== 'windows') {
+    hideRow('toggle-window-title')
     const desc = document.querySelector('#toggle-autostart')?.closest('.setting-row')?.querySelector('.setting-desc')
     if (desc) desc.textContent = 'Запускать AccountChanger при входе в систему'
   }
@@ -136,6 +137,7 @@ async function openSettings() {
     setToggle('toggle-autostart', !!s.autostart)
     setToggle('toggle-autoplay', s.autoPlay !== false)
     setToggle('toggle-aggressive', !!s.aggressive)
+    setToggle('toggle-window-title', !!s.windowTitle)
     setToggle('toggle-stats', s.stats !== false)
     customLauncherPath = s.customLauncher || ''
     updateCustomPathUI()

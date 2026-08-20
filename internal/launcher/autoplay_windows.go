@@ -15,19 +15,23 @@ $ProgressPreference = 'SilentlyContinue'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 $playLabels = @('ИГРАТЬ','PLAY','Play')
+$titles = @({{TITLES}})
 $btnCond = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Button)
 $deadline = [DateTime]::UtcNow.AddSeconds({{TIMEOUT}})
 while ([DateTime]::UtcNow -lt $deadline) {
   foreach ($p in Get-Process -ErrorAction SilentlyContinue) {
     if ($p.MainWindowHandle -eq [IntPtr]::Zero) { continue }
-    if ($p.MainWindowTitle -ne 'Cristalix') { continue }
+    if (-not ($titles -contains $p.MainWindowTitle)) { continue }
     try {
       $root = [Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
       $btns = $root.FindAll([Windows.Automation.TreeScope]::Descendants, $btnCond)
       for ($i = 0; $i -lt $btns.Count; $i++) {
         $bn = $btns.Item($i)
         if (($playLabels -contains $bn.Current.Name) -and $bn.Current.IsEnabled) {
-          try { $bn.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke() } catch {}
+          try {
+            $bn.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+            exit 0
+          } catch {}
         }
       }
     } catch {}
@@ -46,8 +50,18 @@ func encodePowershell(s string) string {
 	return base64.StdEncoding.EncodeToString(b)
 }
 
+func psTitleList() string {
+	titles := allowedTitles()
+	quoted := make([]string, 0, len(titles))
+	for _, t := range titles {
+		quoted = append(quoted, "'"+strings.ReplaceAll(t, "'", "''")+"'")
+	}
+	return strings.Join(quoted, ",")
+}
+
 func clickPlayButton(timeoutSec int) {
 	script := strings.Replace(autoPlayScript, "{{TIMEOUT}}", strconv.Itoa(timeoutSec), 1)
+	script = strings.Replace(script, "{{TITLES}}", psTitleList(), 1)
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowershell(script))
 	cmd.Env = CleanEnv()
 	hideConsole(cmd)
