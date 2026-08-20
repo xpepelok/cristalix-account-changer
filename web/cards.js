@@ -35,17 +35,26 @@ function buildCard(acc) {
   const labelTag = document.createElement('span')
   labelTag.className = 'label-tag'
   labelTag.hidden = true
+  const expiredMark = document.createElement('span')
+  expiredMark.className = 'expired-mark'
+  expiredMark.innerHTML = WARN_SVG
+  expiredMark.hidden = true
   title.appendChild(pin)
   title.appendChild(chip)
   title.appendChild(name)
+  title.appendChild(expiredMark)
   title.appendChild(labelTag)
 
   const meta = document.createElement('div')
   meta.className = 'acc-meta'
   const badgeEl = document.createElement('span')
+  const statusEl = document.createElement('span')
+  statusEl.className = 'badge status'
+  statusEl.hidden = true
   const sub = document.createElement('span')
   sub.className = 'acc-sub'
   meta.appendChild(badgeEl)
+  meta.appendChild(statusEl)
   meta.appendChild(sub)
 
   body.appendChild(title)
@@ -61,6 +70,8 @@ function buildCard(acc) {
   card._name = name
   card._chip = chip
   card._badge = badgeEl
+  card._status = statusEl
+  card._expiredMark = expiredMark
   card._sub = sub
   card._play = playBtn
   card._pin = pin
@@ -188,6 +199,11 @@ function fillCard(card, acc) {
   const badge = accountBadge(acc)
   card._badge.className = 'badge ' + badge.cls
   card._badge.textContent = badge.text
+  card._badge.hidden = badge.cls !== 'notoken'
+  card._expiredMark.hidden = badge.cls !== 'expired'
+  if (card._running !== undefined && card._running !== acc.running && acc.name) reloadPlayerInfo(acc.name)
+  card._running = acc.running
+  setTip(card._expiredMark, badge.cls === 'expired' ? 'Токен истёк - зайди на аккаунт через лаунчер' : '')
   card._sub.textContent = relTime(acc.lastLaunched) || ''
 
   if (acc.running) {
@@ -545,8 +561,9 @@ function buildPickerCard(acc, onAdd) {
     chip.style.setProperty('--chip', grp.color)
     card.style.setProperty('--grp', grp.color)
   }
-  const online = info ? info.online : ''
-  dot.className = 'online-dot' + (online === 'online' ? ' on' : online === 'offline' ? ' off' : '')
+  const st = onlineStatus(info, acc)
+  dot.className = 'online-dot' + dotClass(st)
+  setTip(dot, st ? st.text : '')
   if (acc.name) ensurePlayerInfo(acc.name)
   return card
 }

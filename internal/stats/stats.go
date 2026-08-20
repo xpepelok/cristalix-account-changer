@@ -72,10 +72,13 @@ type Snap struct {
 }
 
 var (
-	statsMu   sync.Mutex
-	statsData = Snap{Online: -1, Active: -1, Total: -1}
-	statsAt   time.Time
+	statsMu    sync.Mutex
+	statsData  = Snap{Online: -1, Active: -1, Total: -1}
+	statsAt    time.Time
+	statsRetry time.Time
 )
+
+const statsFailBackoff = 3 * time.Minute
 
 func Fetch() Snap {
 	statsMu.Lock()
@@ -84,27 +87,39 @@ func Fetch() Snap {
 		statsMu.Unlock()
 		return d
 	}
+	if time.Now().Before(statsRetry) {
+		d := statsData
+		statsMu.Unlock()
+		return d
+	}
 	statsMu.Unlock()
 
-	client := &http.Client{Timeout: 8 * time.Second}
+	client := &http.Client{Timeout: 6 * time.Second}
 	resp, err := client.Get(statsInfoURL)
 	if err != nil {
-		return statsSnapshot()
+		return statsFailed()
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return statsFailed()
+	}
 	var d Snap
 	if json.NewDecoder(resp.Body).Decode(&d) != nil {
-		return statsSnapshot()
+		return statsFailed()
 	}
 	statsMu.Lock()
 	statsData = d
 	statsAt = time.Now()
+	statsRetry = time.Time{}
 	statsMu.Unlock()
 	return d
 }
 
-func statsSnapshot() Snap {
+func statsFailed() Snap {
 	statsMu.Lock()
 	defer statsMu.Unlock()
+	statsRetry = time.Now().Add(statsFailBackoff)
 	return statsData
 }
+

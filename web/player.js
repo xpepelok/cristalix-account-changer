@@ -14,9 +14,102 @@ function applyPlayerInfo(card, acc) {
     card._chip.hidden = true
     card.style.removeProperty('--grp')
   }
-  const online = info ? info.online : ''
-  card._dot.className = 'online-dot' + (online === 'online' ? ' on' : online === 'offline' ? ' off' : '')
-  card._dot.title = online === 'online' ? 'В сети' : online === 'offline' ? 'Не в сети' : ''
+  const st = onlineStatus(info, acc)
+  card._dot.className = 'online-dot' + dotClass(st)
+  setTip(card._dot, st ? st.text : '')
+  paintStatusBadge(card, st)
+}
+
+function paintStatusBadge(card, st) {
+  const el = card._status
+  if (!el) return
+  if (!st) {
+    el.hidden = true
+    el.textContent = ''
+    return
+  }
+  el.hidden = false
+  el.className = 'badge status ' + (st.on ? 'on' : 'off')
+  el.textContent = st.text
+}
+
+function dotClass(st) {
+  if (!st) return ''
+  if (st.on) return ' on'
+  return st.hidden ? '' : ' off'
+}
+
+function sessionStart(acc, info) {
+  let base = acc && acc.lastLaunched ? acc.lastLaunched * 1000 : 0
+  const seen = info && info.lastSeen ? Date.parse(info.lastSeen) : NaN
+  if (!isNaN(seen) && seen > base) base = seen
+  return base
+}
+
+function onlineStatus(info, acc) {
+  if (info && info.online === 'online') {
+    const realm = info.realm ? ' | ' + info.realm : ''
+    const ts = info.lastSeen ? Date.parse(info.lastSeen) : NaN
+    return { text: 'В сети' + (isNaN(ts) ? '' : ' ' + fmtSpan(Date.now() - ts)) + realm, on: true }
+  }
+  if (info && info.online === 'offline') {
+    const off = lastOnlineAt(acc, info)
+    return { text: 'Не в сети' + (off ? ' ' + fmtSpan(Date.now() - off) : ''), on: false }
+  }
+  if (info && info.online === 'hidden') {
+    if (acc && acc.running) {
+      const base = sessionStart(acc, info)
+      return { text: 'В сети' + (base ? ' ' + fmtSpan(Date.now() - base) : ''), on: true }
+    }
+    const local = acc && acc.lastOnline ? acc.lastOnline * 1000 : 0
+    if (!local) return { text: 'Статус скрыт', on: false, hidden: true }
+    return { text: 'Не в сети ' + fmtSpan(Date.now() - local), on: false }
+  }
+  return null
+}
+
+async function reloadPlayerInfo(name) {
+  const key = name.toLowerCase()
+  try {
+    const info = await apiGet('/api/player?fresh=1&name=' + encodeURIComponent(name))
+    if (info && info.name) state.playerInfo.set(key, info)
+  } catch (e) {
+    return
+  }
+  state.cards.forEach((card) => {
+    const acc = cardAccount(card)
+    if (acc && acc.name && acc.name.toLowerCase() === key) applyPlayerInfo(card, acc)
+  })
+  if (state.selected && state.selected.name && state.selected.name.toLowerCase() === key) {
+    renderModalStats(state.selected)
+  }
+}
+
+function lastOnlineAt(acc, info) {
+  let ts = acc && acc.lastOnline ? acc.lastOnline * 1000 : 0
+  const seen = info && info.lastSeen ? Date.parse(info.lastSeen) : NaN
+  if (!isNaN(seen) && seen > ts) ts = seen
+  return ts
+}
+
+function tickOnlineStatus() {
+  state.cards.forEach((card) => {
+    const acc = cardAccount(card)
+    if (!acc || !card._dot) return
+    const info = acc.name ? state.playerInfo.get(acc.name.toLowerCase()) : null
+    const st = onlineStatus(info, acc)
+    card._dot.className = 'online-dot' + dotClass(st)
+    setTip(card._dot, st ? st.text : '')
+    paintStatusBadge(card, st)
+  })
+  const el = document.getElementById('online-tile-value')
+  if (!el || !state.selected) return
+  const info = state.selected.name ? state.playerInfo.get(state.selected.name.toLowerCase()) : null
+  const st = onlineStatus(info, state.selected)
+  if (!st) return
+  const cls = 'stat-tile-value ' + (st.on ? 'green' : '')
+  if (el.className !== cls) el.className = cls
+  if (el.textContent !== st.text) el.textContent = st.text
 }
 
 async function ensurePlayerInfo(name) {

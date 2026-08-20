@@ -91,6 +91,7 @@ type accountDTO struct {
 	Expired        bool   `json:"expired"`
 	Expires        int64  `json:"expires"`
 	LastLaunched   int64  `json:"lastLaunched"`
+	LastOnline     int64  `json:"lastOnline"`
 	Running        bool   `json:"running"`
 	Launching      bool   `json:"launching"`
 	Label          string `json:"label"`
@@ -199,6 +200,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/settings/custom-launcher", s.handleSettingsCustomLauncher)
 	mux.HandleFunc("/api/settings/autoplay", s.handleSettingsAutoPlay)
 	mux.HandleFunc("/api/settings/aggressive", s.handleSettingsAggressive)
+	mux.HandleFunc("/api/settings/window-title", s.handleSettingsWindowTitle)
 	mux.HandleFunc("/api/settings/stats", s.handleSettingsStats)
 	mux.HandleFunc("/api/stats", s.handleStats)
 	mux.HandleFunc("/api/logs", s.handleLogs)
@@ -239,6 +241,11 @@ func (s *Server) handleAccounts(w http.ResponseWriter, r *http.Request) {
 	accounts := s.vault.List()
 	out := make([]accountDTO, 0, len(accounts))
 	running, launching := s.tracker.Resolve()
+	live := make([]string, 0, len(running))
+	for uuid := range running {
+		live = append(live, uuid)
+	}
+	s.vault.TouchOnline(live)
 	for _, acc := range accounts {
 		if acc.Name == "" || acc.Token == "" {
 			continue
@@ -252,6 +259,7 @@ func (s *Server) handleAccounts(w http.ResponseWriter, r *http.Request) {
 			Expired:        expired,
 			Expires:        acc.Expires,
 			LastLaunched:   acc.LastLaunched,
+			LastOnline:     acc.LastOnline,
 			Running:        isRunning,
 			Launching:      !isRunning && launching[acc.UUID],
 			Label:          acc.Label,
@@ -690,6 +698,9 @@ func (s *Server) handlePlayer(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no name"})
 		return
+	}
+	if r.URL.Query().Get("fresh") == "1" {
+		player.InvalidateCache(name)
 	}
 	info := player.FetchPlayerInfo(name)
 	if info == nil {

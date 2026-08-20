@@ -642,6 +642,19 @@ document.getElementById('toggle-aggressive').addEventListener('click', async () 
   }
 })
 
+document.getElementById('toggle-window-title').addEventListener('click', async () => {
+  const next = !document.getElementById('toggle-window-title').classList.contains('on')
+  setToggle('toggle-window-title', next)
+  try {
+    const r = await apiPost('/api/settings/window-title', { enabled: next })
+    setToggle('toggle-window-title', !!r.windowTitle)
+    toast(next ? 'Окно клиента будет называться ником' : 'Заголовок окна клиента вернётся к обычному')
+  } catch (e) {
+    setToggle('toggle-window-title', !next)
+    toast(e.message, true)
+  }
+})
+
 document.getElementById('toggle-stats').addEventListener('click', async () => {
   const next = !document.getElementById('toggle-stats').classList.contains('on')
   setToggle('toggle-stats', next)
@@ -787,6 +800,8 @@ setInterval(loadGroups, 8000)
 
 setInterval(refreshPlayerInfo, 60000)
 
+setInterval(tickOnlineStatus, 1000)
+
 setInterval(checkUpdate, 30 * 60 * 1000)
 
 setInterval(() => {
@@ -829,6 +844,16 @@ setInterval(() => {
     if (!cur) return
     cur = null
     tip.hidden = true
+  }
+  syncTip = (el, text) => {
+    if (cur !== el) return
+    if (!text) {
+      hide()
+      return
+    }
+    if (tip.textContent === text) return
+    tip.textContent = text
+    place(el)
   }
   document.addEventListener('mouseover', (e) => {
     const el = e.target.closest('[title],[data-tip]')

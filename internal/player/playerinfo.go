@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +25,7 @@ type PlayerInfo struct {
 	Label        string `json:"label"`
 	RegisteredAt string `json:"registeredAt"`
 	Online       string `json:"online"`
+	Realm        string `json:"realm"`
 	LastSeen     string `json:"lastSeen"`
 	Subscription string `json:"subscription"`
 	SubEnding    string `json:"subEnding"`
@@ -46,8 +49,9 @@ type searchEntry struct {
 		LastSeenOnline string `json:"lastSeenOnline"`
 	} `json:"social"`
 	Status struct {
-		Online        *bool `json:"online"`
-		PrivacyHidden bool  `json:"privacyHidden"`
+		Online        *bool  `json:"online"`
+		PrivacyHidden bool   `json:"privacyHidden"`
+		Realm         string `json:"realm"`
 	} `json:"status"`
 	Subscription struct {
 		Key    string `json:"key"`
@@ -72,6 +76,13 @@ var playerOnce sync.Once
 
 const playerCacheTTL = 60 * time.Second
 const playerNegativeTTL = 30 * time.Second
+const playerStaleRetry = 25 * time.Second
+const playerMinGap = 600 * time.Millisecond
+const rateLimitCooldown = 90 * time.Second
+const cacheMaxAge = 30 * 24 * time.Hour
+const cacheFlushEvery = 30 * time.Second
+const refreshEvery = 2 * time.Minute
+const serverErrorCooldown = 25 * time.Second
 const chromeUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
 
 func initPlayerClient() {
@@ -96,28 +107,173 @@ func CachedStaff(name string) string {
 	return ""
 }
 
+type cacheEntry struct {
+	Info *PlayerInfo `json:"info"`
+	At   time.Time   `json:"at"`
+}
+
+var cachePath string
+var cacheDirty bool
+
+func OpenCache(path string) {
+	playerCacheMu.Lock()
+	cachePath = path
+	playerCacheMu.Unlock()
+
+	data, err := os.ReadFile(path)
+	if err == nil {
+		var stored map[string]cacheEntry
+		if json.Unmarshal(data, &stored) == nil {
+			playerCacheMu.Lock()
+			for key, entry := range stored {
+				if entry.Info == nil || time.Since(entry.At) > cacheMaxAge {
+					continue
+				}
+				info := *entry.Info
+				info.Online = ""
+				info.Realm = ""
+				playerCache[key] = cachedInfo{info: &info, fetched: entry.At}
+			}
+			playerCacheMu.Unlock()
+		}
+	}
+
+	go func() {
+		t := time.NewTicker(cacheFlushEvery)
+		defer t.Stop()
+		for range t.C {
+			FlushCache()
+		}
+	}()
+}
+
+func RefreshLoop(names func() []string) {
+	for {
+		time.Sleep(refreshEvery)
+		if inCooldown() {
+			continue
+		}
+		for _, name := range names() {
+			if inCooldown() {
+				break
+			}
+			FetchPlayerInfo(name)
+		}
+	}
+}
+
+func FlushCache() {
+	playerCacheMu.Lock()
+	if cachePath == "" || !cacheDirty {
+		playerCacheMu.Unlock()
+		return
+	}
+	out := make(map[string]cacheEntry, len(playerCache))
+	for key, hit := range playerCache {
+		if hit.info == nil {
+			continue
+		}
+		out[key] = cacheEntry{Info: hit.info, At: hit.fetched}
+	}
+	path := cachePath
+	cacheDirty = false
+	playerCacheMu.Unlock()
+
+	data, err := json.Marshal(out)
+	if err != nil {
+		return
+	}
+	tmp := path + ".tmp"
+	if os.WriteFile(tmp, data, 0o644) == nil {
+		_ = os.Rename(tmp, path)
+	}
+}
+
+var gateMu sync.Mutex
+var cooldownUntil time.Time
+var lastRequest time.Time
+
+func inCooldown() bool {
+	gateMu.Lock()
+	defer gateMu.Unlock()
+	return time.Now().Before(cooldownUntil)
+}
+
+func startCooldown(d time.Duration) {
+	gateMu.Lock()
+	until := time.Now().Add(d)
+	if until.After(cooldownUntil) {
+		cooldownUntil = until
+	}
+	gateMu.Unlock()
+}
+
+func waitTurn() {
+	gateMu.Lock()
+	wait := time.Duration(0)
+	if !lastRequest.IsZero() {
+		if gap := time.Since(lastRequest); gap < playerMinGap {
+			wait = playerMinGap - gap
+		}
+	}
+	lastRequest = time.Now().Add(wait)
+	gateMu.Unlock()
+	if wait > 0 {
+		time.Sleep(wait)
+	}
+}
+
+func cached(key string) (cachedInfo, bool) {
+	playerCacheMu.Lock()
+	defer playerCacheMu.Unlock()
+	hit, ok := playerCache[key]
+	return hit, ok
+}
+
+func store(key string, info *PlayerInfo, at time.Time) {
+	playerCacheMu.Lock()
+	playerCache[key] = cachedInfo{info: info, fetched: at}
+	if info != nil {
+		cacheDirty = true
+	}
+	playerCacheMu.Unlock()
+}
+
+func InvalidateCache(name string) {
+	if inCooldown() {
+		return
+	}
+	key := strings.ToLower(name)
+	playerCacheMu.Lock()
+	delete(playerCache, key)
+	playerCacheMu.Unlock()
+}
+
 func FetchPlayerInfo(name string) *PlayerInfo {
 	key := strings.ToLower(name)
-
-	playerCacheMu.Lock()
-	if hit, ok := playerCache[key]; ok {
+	hit, ok := cached(key)
+	if ok {
 		ttl := playerCacheTTL
 		if hit.info == nil {
 			ttl = playerNegativeTTL
 		}
 		if time.Since(hit.fetched) < ttl {
-			playerCacheMu.Unlock()
 			return hit.info
 		}
 	}
-	playerCacheMu.Unlock()
+	if inCooldown() {
+		if ok {
+			return hit.info
+		}
+		return nil
+	}
 
 	info := fetchPlayerInfoRaw(name)
-
-	playerCacheMu.Lock()
-	playerCache[key] = cachedInfo{info: info, fetched: time.Now()}
-	playerCacheMu.Unlock()
-
+	if info == nil && ok && hit.info != nil {
+		store(key, hit.info, time.Now().Add(playerStaleRetry-playerCacheTTL))
+		return hit.info
+	}
+	store(key, info, time.Now())
 	return info
 }
 
@@ -126,13 +282,16 @@ func fetchPlayerInfoRaw(name string) *PlayerInfo {
 	if playerClient == nil {
 		return nil
 	}
-	for attempt := 0; attempt < 5; attempt++ {
+	for attempt := 0; attempt < 3; attempt++ {
 		info, done := tryFetchPlayer(name)
 		if done {
 			return info
 		}
-		if attempt < 4 {
-			time.Sleep(500 * time.Millisecond)
+		if inCooldown() {
+			return nil
+		}
+		if attempt < 2 {
+			time.Sleep(700 * time.Millisecond)
 		}
 	}
 	return nil
@@ -157,11 +316,20 @@ func tryFetchPlayer(name string) (*PlayerInfo, bool) {
 		"sec-fetch-site":     {"same-origin"},
 	}
 
+	waitTurn()
 	resp, err := playerClient.Do(req)
 	if err != nil {
 		return nil, false
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == 429 {
+		startCooldown(retryAfter(resp.Header.Get("retry-after"), rateLimitCooldown))
+		return nil, true
+	}
+	if resp.StatusCode >= 500 {
+		startCooldown(serverErrorCooldown)
+		return nil, true
+	}
 	if resp.StatusCode != 200 {
 		return nil, false
 	}
@@ -188,19 +356,13 @@ func tryFetchPlayer(name string) (*PlayerInfo, bool) {
 
 	color, label := parseFormatted(match.Social.Prefix)
 	online := ""
-	if !match.Status.PrivacyHidden && match.Status.Online != nil {
+	if match.Status.PrivacyHidden {
+		online = "hidden"
+	} else if match.Status.Online != nil {
 		if *match.Status.Online {
 			online = "online"
 		} else {
 			online = "offline"
-		}
-	} else if match.Social.LastSeenOnline != "" {
-		if t, err := time.Parse(time.RFC3339Nano, match.Social.LastSeenOnline); err == nil {
-			if time.Since(t) < 5*time.Minute {
-				online = "online"
-			} else {
-				online = "offline"
-			}
 		}
 	}
 	info := &PlayerInfo{
@@ -213,6 +375,7 @@ func tryFetchPlayer(name string) (*PlayerInfo, bool) {
 		Label:        label,
 		RegisteredAt: match.RegisteredAt,
 		Online:       online,
+		Realm:        match.Status.Realm,
 		LastSeen:     match.Social.LastSeenOnline,
 		Subscription: match.Subscription.Key,
 		SubEnding:    match.Subscription.Ending,
@@ -223,6 +386,18 @@ func tryFetchPlayer(name string) (*PlayerInfo, bool) {
 	}
 
 	return info, true
+}
+
+func retryAfter(header string, fallback time.Duration) time.Duration {
+	secs, err := strconv.Atoi(strings.TrimSpace(header))
+	if err != nil || secs <= 0 {
+		return fallback
+	}
+	d := time.Duration(secs) * time.Second
+	if d > 10*time.Minute {
+		return 10 * time.Minute
+	}
+	return d
 }
 
 var legacyColors = map[rune]string{

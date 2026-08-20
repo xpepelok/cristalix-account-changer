@@ -125,8 +125,14 @@ function renderModalStats(acc) {
   const statusColor = badge.cls === 'ready' ? 'green' : badge.cls === 'expired' ? 'yellow' : ''
   const info = acc.name ? state.playerInfo.get(acc.name.toLowerCase()) : null
   let tiles = ''
-  if (info && info.online) {
-    tiles += statTile(info.online === 'online' ? 'в сети' : 'не в сети', 'статус', info.online === 'online' ? 'green' : '')
+  const st = onlineStatus(info, acc)
+  if (st) {
+    tiles +=
+      '<div class="stat-tile"><span class="stat-tile-value ' +
+      (st.on ? 'green' : '') +
+      '" id="online-tile-value">' +
+      esc(st.text) +
+      '</span><span class="stat-tile-label">статус</span></div>'
   }
   tiles +=
     statTile(badge.text, 'статус токена', statusColor) +
@@ -137,7 +143,7 @@ function renderModalStats(acc) {
     if (info.subscription) tiles += statTile(subLabel(info.subscription), 'подписка', 'blue')
     if (info.likes || info.views) tiles += statTile(info.likes + ' / ' + info.views, 'лайки / просмотры')
     if (info.registeredAt) tiles += statTile(fmtDateTime(info.registeredAt), 'регистрация')
-    if (info.lastSeen && info.online !== 'online') tiles += statTile(fmtDateTime(info.lastSeen), 'был онлайн')
+    if (info.lastSeen && !(st && st.on)) tiles += statTile(fmtDateTime(info.lastSeen), 'был онлайн')
   }
   const box = document.getElementById('modal-stats')
   if (lastModalStats === tiles) return

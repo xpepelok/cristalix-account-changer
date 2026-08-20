@@ -23,6 +23,35 @@ function relTime(ts) {
   return `${Math.floor(diff / 86400)} дн назад`
 }
 
+function fmtSpan(ms) {
+  const units = [
+    ['Г', 31536000],
+    ['М', 2592000],
+    ['д', 86400],
+    ['ч', 3600],
+    ['м', 60],
+    ['с', 1],
+  ]
+  const total = Math.max(0, Math.floor(ms / 1000))
+  let i = 0
+  while (i < units.length - 1 && total < units[i][1]) i++
+  const main = Math.floor(total / units[i][1])
+  let out = main + units[i][0]
+  if (i < units.length - 1) {
+    const rest = Math.floor((total - main * units[i][1]) / units[i + 1][1])
+    if (rest > 0) out += ' ' + rest + units[i + 1][0]
+  }
+  return out
+}
+
+function setTip(el, text) {
+  if (!el) return
+  el.removeAttribute('title')
+  if (text) el.setAttribute('data-tip', text)
+  else el.removeAttribute('data-tip')
+  syncTip(el, text)
+}
+
 function toast(message, isError) {
   const el = document.getElementById('toast')
   el.textContent = message
