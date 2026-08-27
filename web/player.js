@@ -224,6 +224,7 @@ async function mountSkin(uuid) {
   })
   state.viewer = viewer
 
+  viewer.pixelRatio = Math.min(4, Math.max(2, (window.devicePixelRatio || 1) * 2))
   viewer.animation = new skinview3d.IdleAnimation()
   viewer.autoRotate = false
   viewer.controls.enableZoom = true
