@@ -25,6 +25,9 @@ func RunNativeWindow(url, dataPath string, iconPNG []byte, onReady func(focus, q
 
 	_ = os.MkdirAll(dataPath, 0o755)
 
+	enableDPIAwareness()
+	winW, winH := scaledWindowSize(1180, 820)
+
 	_ = os.Setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
 		"--enable-low-end-device-mode --in-process-gpu --renderer-process-limit=1 --js-flags=--max-old-space-size=48 "+
 			"--disable-features=Translate,AutofillServerCommunication,OptimizationHints,MediaRouter,BackForwardCache,InterestFeedContentSuggestions,CalculateNativeWinOcclusion,AudioServiceOutOfProcess "+
@@ -36,8 +39,8 @@ func RunNativeWindow(url, dataPath string, iconPNG []byte, onReady func(focus, q
 		DataPath:  dataPath,
 		WindowOptions: webview2.WindowOptions{
 			Title:  "AccountChanger",
-			Width:  1180,
-			Height: 820,
+			Width:  uint(winW),
+			Height: uint(winH),
 			IconId: 1,
 			Center: true,
 		},
