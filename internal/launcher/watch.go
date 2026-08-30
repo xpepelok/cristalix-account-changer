@@ -4,6 +4,8 @@ import (
 	"accountchanger/internal/jwt"
 	"accountchanger/internal/platform"
 	"accountchanger/internal/vault"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -24,11 +26,40 @@ func (w *Watcher) Run() {
 }
 
 func (w *Watcher) Capture() {
-	cfg, err := ReadLauncherConfig(w.Paths.LauncherCfg)
+	w.captureFile(w.Paths.LauncherCfg)
+	for _, cfg := range InstanceConfigs(w.Paths.Data) {
+		w.captureFile(cfg)
+	}
+}
+
+func (w *Watcher) captureFile(path string) {
+	CaptureConfig(w.Vault, path)
+}
+
+func InstanceConfigs(dataDir string) []string {
+	base := filepath.Join(dataDir, "instances")
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		out = append(out, filepath.Join(base, e.Name(), ".cristalix", ".launcher"))
+	}
+	return out
+}
+
+func CaptureConfig(v *vault.Vault, path string) {
+	if v == nil {
+		return
+	}
+	cfg, err := ReadLauncherConfig(path)
 	if err != nil {
 		return
 	}
-
 	for name, token := range LauncherAccounts(cfg) {
 		if token == "" {
 			continue
@@ -37,6 +68,6 @@ func (w *Watcher) Capture() {
 		if err != nil {
 			continue
 		}
-		w.Vault.UpsertToken(name, token, claims)
+		v.UpsertToken(name, token, claims)
 	}
 }
