@@ -135,7 +135,7 @@ func (v *Vault) UpsertToken(name, token string, claims jwt.Claims) bool {
 		acc.Name = name
 		changed = true
 	}
-	if token != "" && acc.Token != token {
+	if token != "" && acc.Token != token && claims.Exp >= acc.Expires {
 		acc.Token = token
 		acc.Expires = claims.Exp
 		changed = true

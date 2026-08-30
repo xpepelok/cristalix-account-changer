@@ -101,6 +101,7 @@ func (s *Server) refreshToken(uuid string) (string, bool, error) {
 	}
 	name := acc.Name
 	oldToken := acc.Token
+	expired := acc.Expires > 0 && acc.Expires < time.Now().Unix()
 	client := acc.Client
 	if client == "" {
 		client = launcher.CurrentClient(s.paths.LauncherCfg)
@@ -127,8 +128,12 @@ func (s *Server) refreshToken(uuid string) (string, bool, error) {
 		pid = p.Pid
 	}
 	s.importLog("refresh '%s': clicking ИГРАТЬ (pid %d) to mint a fresh token", name, pid)
+	wait := 35 * time.Second
+	if expired {
+		wait = 3 * time.Minute
+	}
 	go launcher.ClickPlayButtonForPid(pid, 25)
-	refreshed := s.waitRefreshedToken(uuid, oldToken, 35*time.Second)
+	refreshed := s.waitRefreshedToken(uuid, oldToken, wait)
 	s.importMu.Lock()
 	if s.importProc == p {
 		s.importProc = nil
@@ -139,6 +144,10 @@ func (s *Server) refreshToken(uuid string) (string, bool, error) {
 		killProcessTree(p.Pid)
 	}
 	if !refreshed {
+		if expired {
+			s.importLog("refresh '%s': token expired, launcher asked for password and none was entered in time", name)
+			return name, false, errors.New("токен истёк - лаунчер просит пароль, войди вручную или импортируй по логину/паролю")
+		}
 		s.importLog("refresh '%s': token unchanged - launcher kept it (not near enough to expiry)", name)
 		return name, false, nil
 	}

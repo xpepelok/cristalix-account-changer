@@ -286,12 +286,14 @@ func (q *LaunchQueue) instanceDir(uuid string) string {
 func (q *LaunchQueue) wipeInstanceToken(uuid string) {
 	cfg := filepath.Join(q.instanceDir(uuid), ".cristalix", ".launcher")
 	if _, err := os.Stat(cfg); err == nil {
+		CaptureConfig(q.vault, cfg)
 		_ = AnnulAccount(cfg)
 	}
 }
 
 func (q *LaunchQueue) removeInstanceDir(uuid string) {
 	dir := q.instanceDir(uuid)
+	CaptureConfig(q.vault, filepath.Join(dir, ".cristalix", ".launcher"))
 	_ = os.Remove(filepath.Join(dir, ".cristalix", "runtime"))
 	_ = os.RemoveAll(dir)
 }
