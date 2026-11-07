@@ -104,36 +104,36 @@ pub(crate) async fn import(
             && let Ok(data) = serde_json::from_slice::<VaultData>(&plain)
         {
             import_vault(&mut tx, secrets, data).await?;
+            imported.push(&paths.vault);
         }
-        imported.push(&paths.vault);
     }
 
     if let Some(bytes) = read(&paths.config) {
         if let Ok(config) = serde_json::from_slice::<LegacyConfig>(&bytes) {
             import_config(&mut tx, config).await?;
+            imported.push(&paths.config);
         }
-        imported.push(&paths.config);
     }
 
     if let Some(bytes) = read(&paths.players) {
         if let Ok(entries) = serde_json::from_slice::<HashMap<String, LegacyPlayerEntry>>(&bytes) {
             import_players(&mut tx, entries).await?;
+            imported.push(&paths.players);
         }
-        imported.push(&paths.players);
     }
 
     if let Some(bytes) = read(&paths.session) {
         if let Ok(launches) = serde_json::from_slice::<Vec<LegacyLaunch>>(&bytes) {
             import_launches(&mut tx, launches).await?;
+            imported.push(&paths.session);
         }
-        imported.push(&paths.session);
     }
 
     if let Some(bytes) = read(&paths.logs) {
         if let Ok(clients) = serde_json::from_slice::<HashMap<String, LegacyLogClient>>(&bytes) {
             import_logs(&mut tx, clients).await?;
+            imported.push(&paths.logs);
         }
-        imported.push(&paths.logs);
     }
 
     tx.commit().await?;

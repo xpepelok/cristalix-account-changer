@@ -330,6 +330,21 @@ async fn migrates_legacy_vault_and_config() {
     assert!(fx.paths.config.with_extension("json.migrated").exists());
 }
 
+#[tokio::test]
+async fn keeps_unreadable_legacy_vault() {
+    let fx = Fixture::new();
+    std::fs::write(&fx.paths.vault, b"not a sealed vault").unwrap();
+    std::fs::write(&fx.paths.config, br#"{"launcher":"new"}"#).unwrap();
+
+    let store = fx.open().await;
+    assert!(store.get("u").is_none());
+    assert!(
+        fx.paths.vault.exists(),
+        "unreadable vault must stay in place"
+    );
+    assert!(fx.paths.config.with_extension("json.migrated").exists());
+}
+
 #[test]
 fn jwt_parses() {
     let parsed = jwt::parse(&token("abc", 7)).unwrap();
