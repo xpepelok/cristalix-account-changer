@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "ac-api"
-version = "0.4.0"
+version = "1.0.0"
 dependencies = [
  "futures",
  "serde",
@@ -14,7 +14,7 @@ dependencies = [
 
 [[package]]
 name = "ac-core"
-version = "0.4.0"
+version = "1.0.0"
 dependencies = [
  "ac-api",
  "ac-launcher",
@@ -35,7 +35,7 @@ dependencies = [
 
 [[package]]
 name = "ac-launcher"
-version = "0.4.0"
+version = "1.0.0"
 dependencies = [
  "ac-api",
  "ac-platform",
@@ -54,7 +54,7 @@ dependencies = [
 
 [[package]]
 name = "ac-platform"
-version = "0.4.0"
+version = "1.0.0"
 dependencies = [
  "aes-gcm",
  "libc",
@@ -65,7 +65,7 @@ dependencies = [
 
 [[package]]
 name = "ac-player"
-version = "0.4.0"
+version = "1.0.0"
 dependencies = [
  "bytes",
  "parking_lot",
@@ -78,7 +78,7 @@ dependencies = [
 
 [[package]]
 name = "ac-skin"
-version = "0.4.0"
+version = "1.0.0"
 dependencies = [
  "png 0.18.1",
  "thiserror 2.0.21",
@@ -86,7 +86,7 @@ dependencies = [
 
 [[package]]
 name = "ac-stats"
-version = "0.4.0"
+version = "1.0.0"
 dependencies = [
  "getrandom 0.3.4",
  "parking_lot",
@@ -100,7 +100,7 @@ dependencies = [
 
 [[package]]
 name = "ac-store"
-version = "0.4.0"
+version = "1.0.0"
 dependencies = [
  "ac-platform",
  "base64 0.22.1",
@@ -115,7 +115,7 @@ dependencies = [
 
 [[package]]
 name = "ac-update"
-version = "0.4.0"
+version = "1.0.0"
 dependencies = [
  "parking_lot",
  "reqwest",
@@ -128,7 +128,7 @@ dependencies = [
 
 [[package]]
 name = "accountchanger"
-version = "0.4.0"
+version = "1.0.0"
 dependencies = [
  "ac-api",
  "ac-core",
