@@ -676,12 +676,10 @@ impl Shell {
         let mut leaving = std::mem::take(&mut self.leaving);
         let mut rendered: Vec<AnyElement> = leaving
             .iter_mut()
-            .enumerate()
-            .map(|(index, (overlay, at))| {
+            .map(|(overlay, at)| {
                 let t = (at.elapsed().as_secs_f32() / MODAL_OUT.as_secs_f32()).min(1.0);
                 let fade = 1.0 - motion::cubic_bezier(motion::EASE, t);
                 div()
-                    .id(("leaving", index))
                     .absolute()
                     .top_0()
                     .left_0()
@@ -700,15 +698,14 @@ impl Shell {
         let mut overlays = std::mem::take(&mut self.overlays);
         let live: Vec<AnyElement> = overlays
             .iter_mut()
-            .enumerate()
-            .map(|(index, overlay)| {
+            .map(|overlay| {
                 div()
                     .absolute()
                     .top_0()
                     .left_0()
                     .size_full()
+                    .occlude()
                     .child(self.render_overlay(overlay, window, cx))
-                    .id(index)
                     .into_any_element()
             })
             .collect();

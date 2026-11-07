@@ -291,13 +291,19 @@ impl SettingsView {
         ModalFrame::new("settings-overlay", 420.0, Shell::closer::<SettingsView>(cx))
             .padding(0.0, 0.0, 14.0, 0.0)
             .child(
-                div().pt(px(16.0)).px(px(18.0)).pb(px(12.0)).child(
-                    div()
-                        .pr(px(40.0))
-                        .text_size(rem(1.05))
-                        .font_weight(FontWeight::BOLD)
-                        .child("Настройки"),
-                ),
+                div()
+                    .pt(px(16.0))
+                    .px(px(18.0))
+                    .pb(px(12.0))
+                    .border_b_1()
+                    .border_color(p.line)
+                    .child(
+                        div()
+                            .pr(px(40.0))
+                            .text_size(rem(1.05))
+                            .font_weight(FontWeight::BOLD)
+                            .child("Настройки"),
+                    ),
             )
             .child(
                 div()
@@ -364,9 +370,9 @@ impl SettingsView {
                                     .text_color(p.muted)
                                     .overflow_hidden()
                                     .child(if has_file {
-                                        "Изображение установлено".to_owned()
+                                        "Установлен".to_owned()
                                     } else {
-                                        "PNG, JPG, WEBP или GIF под интерфейсом".to_owned()
+                                        "PNG, JPG, WEBP или GIF".to_owned()
                                     }),
                             ),
                     )
@@ -398,7 +404,7 @@ impl SettingsView {
                     .py(px(10.0))
                     .border_t_1()
                     .border_color(p.line)
-                    .when(!has_file, |col| col.opacity(0.4))
+                    .when(!has_file, |col| col.hidden())
                     .child(label("Затемнение", format!("{dim}%")))
                     .child(
                         Slider::new(
@@ -409,7 +415,6 @@ impl SettingsView {
                             1,
                         )
                         .track(p.line_strong)
-                        .disabled(!has_file)
                         .on_input(cx.listener(|this, value: &u32, _, cx| {
                             let dim = *value as u8;
                             if let Some(view) = this.overlay::<SettingsView>() {
@@ -436,7 +441,6 @@ impl SettingsView {
                             1,
                         )
                         .track(p.line_strong)
-                        .disabled(!has_file)
                         .on_input(cx.listener(|this, value: &u32, _, cx| {
                             if let Some(view) = this.overlay::<SettingsView>() {
                                 view.blur = Some(*value as u8);

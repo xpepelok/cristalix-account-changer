@@ -94,3 +94,46 @@ pub fn restore(window: &mut Window) {
 pub fn restore(window: &mut Window) {
     window.activate_window();
 }
+
+#[cfg(windows)]
+pub fn toggle_maximize(window: &mut Window) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        IsZoomed, SW_MAXIMIZE, SW_RESTORE, ShowWindowAsync,
+    };
+    if let Some(hwnd) = hwnd(window) {
+        unsafe {
+            let command = if IsZoomed(hwnd).as_bool() {
+                SW_RESTORE
+            } else {
+                SW_MAXIMIZE
+            };
+            let _ = ShowWindowAsync(hwnd, command);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn toggle_maximize(window: &mut Window) {
+    window.zoom_window();
+}
+
+#[cfg(windows)]
+pub fn raise_topmost(window: &Window) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetForegroundWindow, SetWindowPos,
+    };
+    if let Some(hwnd) = hwnd(window) {
+        unsafe {
+            let _ = SetWindowPos(
+                hwnd,
+                Some(HWND_TOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+            );
+            let _ = SetForegroundWindow(hwnd);
+        }
+    }
+}

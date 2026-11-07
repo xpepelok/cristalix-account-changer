@@ -2,6 +2,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use ac_api::{Account, RAM_DEFAULT, RAM_MAX, RAM_MIN, RAM_STEP, TextureKind, TokenState, snap_ram};
+use futures::channel::oneshot;
 use gpui::{
     AnyElement, AppContext, ClipboardItem, Context, ElementId, Entity, Focusable, FontWeight, Hsla,
     InteractiveElement, IntoElement, MouseButton, ObjectFit, ParentElement, Render, RenderImage,
@@ -948,8 +949,9 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> Task<()> {
         cx.spawn_in(window, async move |this, cx| {
+            let mut shown_at: Option<Instant> = None;
             loop {
-                let request = this.update_in(cx, |shell, window, cx| {
+                let step = this.update_in(cx, |shell, window, cx| {
                     let live = window.is_window_active();
                     let skin = match shell.store.read(cx).skin_texture(&uuid) {
                         Some(Texture::Ready(skin)) => Some(skin),
@@ -958,19 +960,34 @@ impl Shell {
                     let scale = window.scale_factor();
                     let view = shell.overlay::<AccountView>()?;
                     live.then_some(())?;
-                    view.stage.request(skin?, scale)
+                    let request = skin.and_then(|skin| view.stage.request(skin, scale));
+                    Some((request, next_frame(window)))
                 });
-                let Ok(request) = request else {
+                let Ok(step) = step else {
                     break;
                 };
-                let Some(request) = request else {
+                let Some((request, mut frame_shown)) = step else {
                     cx.background_executor().timer(STAGE_IDLE).await;
+                    continue;
+                };
+                let Some(request) = request else {
+                    frame_shown.await.ok();
                     continue;
                 };
                 let frame = cx
                     .background_executor()
                     .spawn(async move { request.render() })
                     .await;
+                loop {
+                    frame_shown.await.ok();
+                    if shown_at.is_none_or(|at| at.elapsed() >= STAGE_FRAME) {
+                        break;
+                    }
+                    let Ok(next) = this.update_in(cx, |_, window, _| next_frame(window)) else {
+                        return;
+                    };
+                    frame_shown = next;
+                }
                 let applied = this.update_in(cx, |shell, window, cx| {
                     let Some(view) = shell.overlay::<AccountView>() else {
                         return;
@@ -984,7 +1001,7 @@ impl Shell {
                 if applied.is_err() {
                     break;
                 }
-                cx.background_executor().timer(STAGE_FRAME).await;
+                shown_at = Some(Instant::now());
             }
         })
     }
@@ -1100,4 +1117,12 @@ impl Shell {
             self.step_group_ram(direction, cx);
         }
     }
+}
+
+fn next_frame(window: &Window) -> oneshot::Receiver<()> {
+    let (vsync, frame_shown) = oneshot::channel();
+    window.on_next_frame(move |_, _| {
+        vsync.send(()).ok();
+    });
+    frame_shown
 }

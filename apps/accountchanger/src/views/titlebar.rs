@@ -360,7 +360,7 @@ impl Shell {
                         } else {
                             "Развернуть"
                         })
-                        .on_click(|_, window, _| window.zoom_window()),
+                        .on_click(|_, window, _| crate::platform::window::toggle_maximize(window)),
                 ),
             )
             .child(
@@ -385,7 +385,7 @@ impl Shell {
             .window_control_area(WindowControlArea::Drag)
             .on_mouse_down(MouseButton::Left, |event, window, _| {
                 if event.click_count >= 2 {
-                    window.zoom_window();
+                    crate::platform::window::toggle_maximize(window);
                 } else {
                     window.start_window_move();
                 }

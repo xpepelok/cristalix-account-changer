@@ -10,7 +10,7 @@ use image::{Frame, RgbaImage};
 use parking_lot::Mutex;
 use smallvec::smallvec;
 
-pub const STAGE_FRAME: Duration = Duration::from_millis(33);
+pub const STAGE_FRAME: Duration = Duration::from_millis(13);
 pub const STAGE_IDLE: Duration = Duration::from_millis(250);
 
 pub fn bgra_image(width: u32, height: u32, bgra: Vec<u8>) -> Option<Arc<RenderImage>> {

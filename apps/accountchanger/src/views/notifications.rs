@@ -222,7 +222,7 @@ impl Shell {
                 menu_surface(p.surface_2, 11.0, 0.0, cx)
                     .px(px(12.0))
                     .py(px(8.0))
-                    .min_w(px(210.0))
+                    .w(px(210.0))
                     .child(body)
                     .id("online-pop")
                     .on_mouse_down_out(

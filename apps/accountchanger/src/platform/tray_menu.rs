@@ -34,7 +34,9 @@ impl TrayMenu {
             .unwrap_or(size(px(1920.0), px(1080.0)));
         let height = Self::height();
         let left = x.min(f32::from(screen.width) - WIDTH - 4.0).max(0.0);
-        let top = y.min(f32::from(screen.height) - height - 4.0).max(0.0);
+        let top = (y - height)
+            .min(f32::from(screen.height) - height - 4.0)
+            .max(0.0);
         cx.open_window(
             WindowOptions {
                 titlebar: None,
@@ -50,6 +52,7 @@ impl TrayMenu {
                 ..WindowOptions::default()
             },
             |window, cx| {
+                crate::platform::window::raise_topmost(window);
                 cx.new(|cx| TrayMenu {
                     commands,
                     _activation: cx.observe_window_activation(window, |_, window, _| {

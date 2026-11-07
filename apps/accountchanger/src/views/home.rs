@@ -638,7 +638,12 @@ impl Shell {
                         this.close_popup(cx);
                         this.create_group_flow(window, cx);
                     }))
-                    .child("＋ Создать группу"),
+                    .group("group-create")
+                    .child(
+                        icon(Icon::Plus, px(14.0), p.muted)
+                            .group_hover("group-create", |glyph| glyph.text_color(p.text)),
+                    )
+                    .child("Создать группу"),
             )
             .child(
                 menu_item("group-manage", MenuItem::Action, &p)
@@ -649,7 +654,12 @@ impl Shell {
                         this.close_popup(cx);
                         this.open_groups(window, cx);
                     }))
-                    .child("⚙ Управление группами"),
+                    .group("group-manage")
+                    .child(
+                        icon(Icon::Gear, px(14.0), p.muted)
+                            .group_hover("group-manage", |glyph| glyph.text_color(p.text)),
+                    )
+                    .child("Управление группами"),
             );
         deferred(div().absolute().top(px(46.0)).left_0().child(drop_in(
             "group-menu-in",
@@ -1227,7 +1237,9 @@ impl Shell {
                                 .font_weight(FontWeight::BOLD)
                                 .line_height(px(17.0))
                                 .flex()
+                                .items_center()
                                 .justify_center()
+                                .whitespace_nowrap()
                                 .shadow(shadow(0.0, 2.0, 6.0, 0.0, rgba(0x000000, 0.3)))
                                 .child(format!("{}/{}", import.done, import.total)),
                         )

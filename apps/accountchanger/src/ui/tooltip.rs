@@ -1,7 +1,7 @@
 use gpui::{
     AnimationExt, App, Bounds, FontWeight, Global, InteractiveElement, IntoElement, ParentElement,
     Pixels, SharedString, Stateful, StatefulInteractiveElement, Styled, TextRun, Window, canvas,
-    div, px,
+    div, prelude::FluentBuilder, px,
 };
 
 use crate::motion::Key;
@@ -111,8 +111,9 @@ pub fn tooltip_overlay(window: &mut Window, cx: &mut App) -> Option<impl IntoEle
     );
     let viewport = window.viewport_size();
     let vw = f32::from(viewport.width);
-    let width = (text_width + PAD_X * 2.0 + 2.0).min(MAX_WIDTH);
-    let wraps = text_width + PAD_X * 2.0 + 2.0 > MAX_WIDTH;
+    let natural = text_width.ceil() + PAD_X * 2.0 + 4.0;
+    let width = natural.min(MAX_WIDTH);
+    let wraps = natural > MAX_WIDTH;
     let height = f32::from(font_size) * LINE * if wraps { 2.0 } else { 1.0 } + PAD_Y * 2.0 + 2.0;
     let center = f32::from(anchor.origin.x) + f32::from(anchor.size.width) / 2.0;
     let left = (center - width / 2.0).max(EDGE).min(vw - width - EDGE);
@@ -139,6 +140,7 @@ pub fn tooltip_overlay(window: &mut Window, cx: &mut App) -> Option<impl IntoEle
             .font_weight(FontWeight::MEDIUM)
             .line_height(gpui::relative(LINE))
             .text_color(p.text)
+            .when(!wraps, |tip| tip.whitespace_nowrap())
             .child(text)
             .with_animation(
                 gpui::ElementId::Name(format!("tooltip-{key:?}").into()),
