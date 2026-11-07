@@ -91,13 +91,13 @@ def render():
     )
     canvas.paste(solid((255, 255, 255)), (0, 0), highlight)
 
-    badge_center = (768 * SS, 768 * SS)
-    badge_radius = 170 * SS
+    badge_center = (800 * SS, 800 * SS)
+    badge_radius = 150 * SS
     cutout = 22 * SS
     bx, by = badge_center
 
     mark_mask = Image.new("L", (S, S), 0)
-    diamonds(ImageDraw.Draw(mark_mask), (448 * SS, 452 * SS), 10.6 * SS)
+    diamonds(ImageDraw.Draw(mark_mask), (512 * SS, 512 * SS), 10.6 * SS)
     ImageDraw.Draw(mark_mask).ellipse(
         [bx - badge_radius - cutout, by - badge_radius - cutout, bx + badge_radius + cutout, by + badge_radius + cutout],
         fill=0,
@@ -112,7 +112,7 @@ def render():
     ImageDraw.Draw(badge_mask).ellipse([bx - badge_radius, by - badge_radius, bx + badge_radius, by + badge_radius], fill=255)
     badge.paste(solid(BADGE), (0, 0), badge_mask)
     arrow_mask = Image.new("L", (S, S), 0)
-    arrows(ImageDraw.Draw(arrow_mask), badge_center, 104 * SS, 32 * SS)
+    arrows(ImageDraw.Draw(arrow_mask), badge_center, 92 * SS, 28 * SS)
     badge.paste(solid((255, 255, 255)), (0, 0), arrow_mask)
     shadow(canvas, badge, 8, 16, 0.4)
     canvas.alpha_composite(badge)
