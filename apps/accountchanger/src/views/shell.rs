@@ -109,6 +109,7 @@ pub struct Shell {
     focus: FocusHandle,
     font: SharedString,
     ambient_task: Option<Task<()>>,
+    backdrop_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -157,6 +158,7 @@ impl Shell {
             focus: cx.focus_handle(),
             font,
             ambient_task: None,
+            backdrop_task: None,
             _subscriptions: subscriptions,
         }
     }
@@ -195,12 +197,35 @@ impl Shell {
                 };
                 this.update(cx, |shell, cx| {
                     shell.backdrop.finish(load, image);
+                    shell.animate_backdrop(cx);
                     cx.notify();
                 })
                 .ok();
             })
             .detach();
         }
+    }
+
+    fn animate_backdrop(&mut self, cx: &mut Context<Self>) {
+        self.backdrop_task = self.backdrop.animated().then(|| {
+            cx.spawn(async move |this, cx| {
+                loop {
+                    let Ok(Some(wait)) = this.update(cx, |shell, _| shell.backdrop.next_change())
+                    else {
+                        break;
+                    };
+                    cx.background_executor().timer(wait).await;
+                    let advanced = this.update(cx, |_, cx| {
+                        if ambient::is_live(cx) {
+                            cx.notify();
+                        }
+                    });
+                    if advanced.is_err() {
+                        break;
+                    }
+                }
+            })
+        });
     }
 
     pub fn reveal(&mut self, window: &mut Window, cx: &mut Context<Self>) {

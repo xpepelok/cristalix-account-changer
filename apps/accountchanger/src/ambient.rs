@@ -24,6 +24,11 @@ pub fn set_live(live: bool, cx: &mut App) {
     cx.default_global::<Ambient>().live = live;
 }
 
+pub fn is_live(cx: &App) -> bool {
+    cx.try_global::<Ambient>()
+        .is_some_and(|ambient| ambient.live)
+}
+
 pub fn cycle(period: Duration, cx: &App) -> Option<f32> {
     let ambient = cx.try_global::<Ambient>().filter(|ambient| ambient.live)?;
     let elapsed = ambient.origin.elapsed().as_secs_f32();

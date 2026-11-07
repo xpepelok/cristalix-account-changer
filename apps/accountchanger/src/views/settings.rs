@@ -77,6 +77,10 @@ pub fn small_button(
         .child(label)
 }
 
+const WIDE_MIN_VIEWPORT: f32 = 880.0;
+const WIDE_WIDTH: f32 = 820.0;
+const NARROW_WIDTH: f32 = 420.0;
+
 impl SettingsView {
     pub fn render(
         &mut self,
@@ -286,9 +290,37 @@ impl SettingsView {
                     .child(switch("toggle-stats", settings.stats, Switch::Stats, cx)),
             );
 
-        let background = self.render_background(&settings, cx);
+        let wide = f32::from(window.viewport_size().width) >= WIDE_MIN_VIEWPORT;
+        let background = self.render_background(&settings, wide, cx);
+        let column = |title: &'static str, content: gpui::Div| {
+            div()
+                .flex()
+                .flex_col()
+                .when(wide, |column| column.flex_1().min_w_0())
+                .child(section(title))
+                .child(content.when(wide, |card| card.flex_1()))
+        };
+        let launch = column("Запуск", launch);
+        let app = column("Приложение", app);
+        let groups = if wide {
+            div()
+                .flex()
+                .gap(px(14.0))
+                .child(launch)
+                .child(app)
+                .into_any_element()
+        } else {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(14.0))
+                .child(launch)
+                .child(app)
+                .into_any_element()
+        };
 
-        ModalFrame::new("settings-overlay", 420.0, Shell::closer::<SettingsView>(cx))
+        let width = if wide { WIDE_WIDTH } else { NARROW_WIDTH };
+        ModalFrame::new("settings-overlay", width, Shell::closer::<SettingsView>(cx))
             .padding(0.0, 0.0, 14.0, 0.0)
             .child(
                 div()
@@ -313,8 +345,7 @@ impl SettingsView {
                     .pt(px(6.0))
                     .px(px(18.0))
                     .pb(px(16.0))
-                    .child(div().child(section("Запуск")).child(launch))
-                    .child(div().child(section("Приложение")).child(app))
+                    .child(groups)
                     .child(div().child(section("Фон")).child(background)),
             )
             .into_any_element()
@@ -323,6 +354,7 @@ impl SettingsView {
     fn render_background(
         &mut self,
         settings: &Settings,
+        wide: bool,
         cx: &mut Context<Shell>,
     ) -> impl IntoElement + use<> {
         let p = cx.palette();
@@ -330,6 +362,7 @@ impl SettingsView {
         let dim = self.dim.unwrap_or(background.dim);
         let blur = self.blur.unwrap_or(background.blur);
         let has_file = background.file.is_some();
+        let slot = || div().flex().flex_col().flex_1().min_w_0().gap(px(8.0));
         let label = |text: &'static str, value: String| {
             div()
                 .flex()
@@ -398,58 +431,58 @@ impl SettingsView {
             .child(
                 div()
                     .flex()
-                    .flex_col()
-                    .gap(px(8.0))
+                    .when(!wide, |sliders| sliders.flex_col())
+                    .gap(px(if wide { 24.0 } else { 14.0 }))
                     .px(px(14.0))
                     .py(px(10.0))
                     .border_t_1()
                     .border_color(p.line)
-                    .when(!has_file, |col| col.hidden())
-                    .child(label("Затемнение", format!("{dim}%")))
+                    .when(!has_file, |sliders| sliders.hidden())
                     .child(
-                        Slider::new(
-                            "background-dim",
-                            dim as u32,
-                            0,
-                            BACKGROUND_DIM_MAX as u32,
-                            1,
-                        )
-                        .track(p.line_strong)
-                        .on_input(cx.listener(|this, value: &u32, _, cx| {
-                            let dim = *value as u8;
-                            if let Some(view) = this.overlay::<SettingsView>() {
-                                view.dim = Some(dim);
-                            }
-                            this.store.update(cx, |store, cx| {
-                                store.settings.background.dim = dim;
-                                cx.notify();
-                            });
-                        }))
-                        .on_commit(
-                            cx.listener(|this, value: &u32, _, cx| {
-                                this.commit_dim(*value as u8, cx)
-                            }),
+                        slot().child(label("Затемнение", format!("{dim}%"))).child(
+                            Slider::new(
+                                "background-dim",
+                                dim as u32,
+                                0,
+                                BACKGROUND_DIM_MAX as u32,
+                                1,
+                            )
+                            .track(p.line_strong)
+                            .on_input(cx.listener(|this, value: &u32, _, cx| {
+                                let dim = *value as u8;
+                                if let Some(view) = this.overlay::<SettingsView>() {
+                                    view.dim = Some(dim);
+                                }
+                                this.store.update(cx, |store, cx| {
+                                    store.settings.background.dim = dim;
+                                    cx.notify();
+                                });
+                            }))
+                            .on_commit(cx.listener(
+                                |this, value: &u32, _, cx| this.commit_dim(*value as u8, cx),
+                            )),
                         ),
                     )
-                    .child(label("Размытие", format!("{blur} px")))
                     .child(
-                        Slider::new(
-                            "background-blur",
-                            blur as u32,
-                            0,
-                            BACKGROUND_BLUR_MAX as u32,
-                            1,
-                        )
-                        .track(p.line_strong)
-                        .on_input(cx.listener(|this, value: &u32, _, cx| {
-                            if let Some(view) = this.overlay::<SettingsView>() {
-                                view.blur = Some(*value as u8);
-                            }
-                            cx.notify();
-                        }))
-                        .on_commit(cx.listener(
-                            |this, value: &u32, _, cx| this.commit_blur(*value as u8, cx),
-                        )),
+                        slot().child(label("Размытие", format!("{blur} px"))).child(
+                            Slider::new(
+                                "background-blur",
+                                blur as u32,
+                                0,
+                                BACKGROUND_BLUR_MAX as u32,
+                                1,
+                            )
+                            .track(p.line_strong)
+                            .on_input(cx.listener(|this, value: &u32, _, cx| {
+                                if let Some(view) = this.overlay::<SettingsView>() {
+                                    view.blur = Some(*value as u8);
+                                }
+                                cx.notify();
+                            }))
+                            .on_commit(cx.listener(
+                                |this, value: &u32, _, cx| this.commit_blur(*value as u8, cx),
+                            )),
+                        ),
                     ),
             )
     }

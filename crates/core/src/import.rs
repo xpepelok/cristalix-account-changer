@@ -23,6 +23,7 @@ pub(crate) enum StartResult {
     Rejected(String),
 }
 
+#[cfg_attr(not(windows), expect(dead_code))]
 pub(crate) struct Task {
     pub index: usize,
     pub login: String,
