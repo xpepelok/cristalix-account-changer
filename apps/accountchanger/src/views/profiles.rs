@@ -535,7 +535,8 @@ impl Shell {
                                 Some(index) => {
                                     let value = line[index + 1..].to_owned();
                                     let input = cx.new(|cx| {
-                                        let mut input = TextInput::new("", window, cx);
+                                        let mut input =
+                                            TextInput::new("", window, cx).read_only(builtin);
                                         input.set_text(value, cx);
                                         input
                                     });
@@ -555,7 +556,9 @@ impl Shell {
                     let text =
                         pretty_json(content.get(file).map(String::as_str).unwrap_or_default());
                     let input = cx.new(|cx| {
-                        let mut input = TextInput::new("", window, cx).multiline();
+                        let mut input = TextInput::new("", window, cx)
+                            .multiline()
+                            .read_only(builtin);
                         input.set_text(text, cx);
                         input
                     });

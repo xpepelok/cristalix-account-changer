@@ -95,6 +95,7 @@ pub struct TextInput {
     masked: bool,
     align_right: bool,
     multiline: bool,
+    read_only: bool,
     caret_visible: bool,
     blink: Option<Task<()>>,
 }
@@ -139,6 +140,7 @@ impl TextInput {
             masked: false,
             align_right: false,
             multiline: false,
+            read_only: false,
             caret_visible: true,
             blink: None,
         }
@@ -161,6 +163,11 @@ impl TextInput {
 
     pub fn multiline(mut self) -> Self {
         self.multiline = true;
+        self
+    }
+
+    pub fn read_only(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
         self
     }
 
@@ -349,6 +356,9 @@ impl TextInput {
     }
 
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
         if self.selected.is_empty() {
             self.select_to(self.previous_boundary(self.cursor()), cx);
         }
@@ -356,6 +366,9 @@ impl TextInput {
     }
 
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
         if self.selected.is_empty() {
             self.select_to(self.next_boundary(self.cursor()), cx);
         }
@@ -610,6 +623,9 @@ impl EntityInputHandler for TextInput {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.read_only {
+            return;
+        }
         let range = range
             .as_ref()
             .map(|range| self.range_from_utf16(range))
@@ -635,6 +651,9 @@ impl EntityInputHandler for TextInput {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.read_only {
+            return;
+        }
         let range = range
             .as_ref()
             .map(|range| self.range_from_utf16(range))

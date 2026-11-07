@@ -287,6 +287,7 @@ impl Shell {
                     )
                     .icon(Icon::Refresh, 16.0)
                     .rotate_on_hover(-180.0, Duration::from_millis(550), crate::motion::STANDARD)
+                    .rotate_on_press(-180.0, Duration::from_millis(350))
                     .disabled(self.refreshing)
                     .sound(Some(Sound::Confirm))
                     .tooltip("Обновить токены, срок которых истекает в ближайшую неделю")

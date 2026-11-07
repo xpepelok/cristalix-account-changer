@@ -39,6 +39,16 @@ pub fn drop_in(id: impl Into<ElementId>, menu: Stateful<Div>, closing: Option<f3
         .into_any_element()
 }
 
+pub fn pop_in(id: impl Into<ElementId>, menu: Stateful<Div>) -> AnyElement {
+    menu.occlude()
+        .with_animation(
+            id,
+            Animation::new(Duration::from_millis(140)).with_easing(crate::motion::eased(EASE)),
+            |menu, t| menu.mt(px(-6.0 * (1.0 - t))),
+        )
+        .into_any_element()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuItem {
     Plain,

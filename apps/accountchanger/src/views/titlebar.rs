@@ -18,6 +18,8 @@ use crate::views::shell::{Popup, Shell};
 
 pub const TITLEBAR_HEIGHT: f32 = 54.0;
 const STATS_PULSE: Key = Key::of("stats-bars");
+const STATS_BAR: f32 = 0.25;
+const STATS_ENTER: f32 = 0.37;
 const PROFILES_PULSE: Key = Key::of("profiles-lift");
 const THEME_POP: Key = Key::of("theme-pop");
 const THEME_SWAP: Key = Key::of("theme-swap");
@@ -53,14 +55,19 @@ const BARS: [(f32, f32, f32, f32); 3] = [
     (20.0, 7.0, 1.3, 0.12),
 ];
 
-fn stats_bars(progress: f32, color: gpui::Hsla) -> gpui::Div {
+fn stats_bars(progress: f32, entering: bool, color: gpui::Hsla) -> gpui::Div {
     let stroke = 1.6 * ICON_SCALE;
     div()
         .relative()
         .size(px(17.0))
         .children(BARS.iter().map(|(x, length, grow, delay)| {
-            let local = ((progress * 0.37 - delay) / 0.25).clamp(0.0, 1.0);
-            let scale = 1.0 + (grow - 1.0) * motion::cubic_bezier(motion::EASE, local);
+            let factor = if entering {
+                let local = ((progress * STATS_ENTER - delay) / STATS_BAR).clamp(0.0, 1.0);
+                motion::cubic_bezier(motion::EASE, local)
+            } else {
+                1.0 - motion::cubic_bezier(motion::EASE, 1.0 - progress)
+            };
+            let scale = 1.0 + (grow - 1.0) * factor;
             let height = length * scale * ICON_SCALE + stroke;
             div()
                 .absolute()
@@ -167,7 +174,7 @@ impl Shell {
 
         let bars_progress = motion::value(STATS_PULSE, cx);
         let stats_color = hover_color("stats-btn", cx);
-        let stats_icon = stats_bars(bars_progress, stats_color);
+        let stats_icon = stats_bars(bars_progress, motion::is_on(STATS_PULSE, cx), stats_color);
 
         let logs_color = hover_color("logs-btn", cx);
         let logs_hovered = motion::is_on(Key::of("logs-btn"), cx);
@@ -238,7 +245,11 @@ impl Shell {
                 IconButton::new("stats-btn", Key::of("stats-btn"), IconStyle::Round)
                     .tooltip("Статистика")
                     .content(stats_icon)
-                    .pulse(STATS_PULSE, Duration::from_millis(370))
+                    .hover_track(
+                        STATS_PULSE,
+                        Duration::from_secs_f32(STATS_ENTER),
+                        Duration::from_secs_f32(STATS_BAR),
+                    )
                     .sound(Some(Sound::Stats))
                     .on_click(cx.listener(|this, _, window, cx| this.open_stats(window, cx))),
             )

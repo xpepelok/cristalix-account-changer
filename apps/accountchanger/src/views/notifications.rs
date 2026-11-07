@@ -9,7 +9,7 @@ use crate::format::bytes;
 use crate::motion::{self, Key};
 use crate::sound::{self, Sound};
 use crate::theme::{ThemeExt, mix, rem};
-use crate::ui::{drop_in, menu_surface, with_tooltip};
+use crate::ui::{drop_in, menu_surface, pop_in, with_tooltip};
 use crate::views::shell::{Popup, Shell};
 
 impl Shell {
@@ -217,7 +217,7 @@ impl Shell {
             OnlineStats::Unavailable => note("Онлайн временно недоступен.", cx),
         };
         deferred(
-            div().absolute().top(px(34.0)).left_0().child(drop_in(
+            div().absolute().top(px(34.0)).left_0().child(pop_in(
                 "online-pop-in",
                 menu_surface(p.surface_2, 11.0, 0.0, cx)
                     .px(px(12.0))
@@ -228,7 +228,6 @@ impl Shell {
                     .on_mouse_down_out(
                         cx.listener(|this, _, _, cx| this.dismiss_popup(Popup::Online, cx)),
                     ),
-                None,
             )),
         )
         .with_priority(1)

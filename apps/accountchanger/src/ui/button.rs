@@ -4,15 +4,16 @@ use gpui::{
     AnyElement, App, BoxShadow, ClickEvent, Div, ElementId, FontWeight, Hsla, InteractiveElement,
     IntoElement, MouseButton, ParentElement, Radians, RenderOnce, SharedString,
     StatefulInteractiveElement, Styled, Transformation, Window, div, prelude::FluentBuilder, px,
-    relative,
+    relative, size,
 };
 
 use crate::assets::{Icon, icon};
-use crate::motion::{self, EASE, EASE_SPRING, Key};
+use crate::motion::{self, EASE, EASE_SPRING, Key, STANDARD};
 use crate::sound::{self, Sound};
 use crate::theme::{Palette, ThemeExt, alpha, mix, rem, rgb, rgba, shadow};
 use crate::ui::{ClickHandler, with_tooltip};
 
+const BUTTON_PRESS: f32 = 0.03;
 const PRESS_IN: Duration = Duration::from_millis(70);
 const SPRING: Duration = Duration::from_millis(160);
 
@@ -227,6 +228,7 @@ impl RenderOnce for Button {
         } else {
             motion::value(press_key(key), cx)
         };
+        let shrink = 1.0 - 2.0 * BUTTON_PRESS * press;
         let mut button = div()
             .id(self.id)
             .relative()
@@ -235,19 +237,26 @@ impl RenderOnce for Button {
             .flex_none()
             .items_center()
             .justify_center()
-            .gap(px(7.0))
+            .gap(px(7.0 * shrink))
             .h(px(self.height.unwrap_or(41.0)))
             .px(px(16.0))
-            .child(press_layer(press, 0.03, 10.0, look.bg, look.border, glow))
+            .child(press_layer(
+                press,
+                BUTTON_PRESS,
+                10.0,
+                look.bg,
+                look.border,
+                glow,
+            ))
             .text_color(look.fg)
-            .text_size(rem(0.85))
+            .text_size(rem(0.85) * shrink)
             .font_weight(FontWeight::SEMIBOLD)
             .whitespace_nowrap()
             .when_some(self.min_width, |b, w| b.min_w(px(w)))
             .when(self.full, |b| b.w_full())
             .when(self.grow, |b| b.flex_1())
             .when_some(self.icon, |b, (glyph, size)| {
-                b.child(icon(glyph, px(size), look.fg))
+                b.child(icon(glyph, px(size * shrink), look.fg))
             })
             .child(self.label);
         if self.disabled {
@@ -308,6 +317,13 @@ impl IconStyle {
             Self::Outline => (41.0, 10.0),
             Self::Play | Self::Stop | Self::Busy => (40.0, 12.0),
             Self::Close => (30.0, 8.0),
+        }
+    }
+
+    fn press_depth(self) -> f32 {
+        match self {
+            Self::Outline | Self::Filter => 0.05,
+            _ => 0.0,
         }
     }
 
@@ -373,8 +389,10 @@ pub struct IconButton {
     icon: Option<(Icon, f32)>,
     content: Option<AnyElement>,
     rotate_on_hover: Option<(f32, Duration, [f32; 4])>,
+    rotate_on_press: Option<(f32, Duration)>,
     glyph_transform: Option<Transformation>,
     pulse: Option<(Key, Duration)>,
+    hover_track: Option<(Key, Duration, Duration)>,
     on_secondary: Option<ClickHandler>,
     active: bool,
     disabled: bool,
@@ -393,8 +411,10 @@ impl IconButton {
             icon: None,
             content: None,
             rotate_on_hover: None,
+            rotate_on_press: None,
             glyph_transform: None,
             pulse: None,
+            hover_track: None,
             on_secondary: None,
             active: false,
             disabled: false,
@@ -427,6 +447,16 @@ impl IconButton {
 
     pub fn pulse(mut self, key: Key, duration: Duration) -> Self {
         self.pulse = Some((key, duration));
+        self
+    }
+
+    pub fn rotate_on_press(mut self, degrees: f32, duration: Duration) -> Self {
+        self.rotate_on_press = Some((degrees, duration));
+        self
+    }
+
+    pub fn hover_track(mut self, key: Key, enter: Duration, leave: Duration) -> Self {
+        self.hover_track = Some((key, enter, leave));
         self
     }
 
@@ -487,29 +517,47 @@ impl RenderOnce for IconButton {
         let lifts = self.style.lifts() && !self.disabled;
         let lift = if lifts { -cubic_lift(key, cx) } else { 0.0 };
         let spin_key = Key::new("spin", key);
-        let spin = self
-            .rotate_on_hover
-            .map(|(degrees, _, _)| degrees * motion::value(spin_key, cx));
+        let press_spin_key = Key::new("press-spin", key);
+        let spin = self.rotate_on_hover.map(|(degrees, _, _)| {
+            let pressed = self
+                .rotate_on_press
+                .map_or(0.0, |(extra, _)| extra * motion::value(press_spin_key, cx));
+            degrees * motion::value(spin_key, cx) + pressed
+        });
+        let press_rotation = self.rotate_on_press;
         let sound = self.sound;
         let rotation = self.rotate_on_hover;
         let pulse = self.pulse;
+        let hover_track = self.hover_track;
         let transform = self.glyph_transform;
-        let glyph = self.icon.map(|(glyph, size)| {
-            let svg = icon(glyph, px(size), look.fg);
-            match (spin, transform) {
-                (_, Some(transform)) => svg.with_transformation(transform).into_any_element(),
-                (Some(degrees), None) => svg
-                    .with_transformation(Transformation::rotate(Radians(degrees.to_radians())))
-                    .into_any_element(),
-                (None, None) => svg.into_any_element(),
-            }
-        });
         let pressing = !self.disabled && self.style != IconStyle::Busy;
         let press = if pressing {
             motion::value(press_key(key), cx)
         } else {
             0.0
         };
+        let depth = self.style.press_depth();
+        let shrink = 1.0 - 2.0 * depth * press;
+        let glyph = self.icon.map(|(glyph, glyph_size)| {
+            let svg = icon(glyph, px(glyph_size), look.fg);
+            let base = match (spin, transform) {
+                (_, Some(transform)) => Some(transform),
+                (Some(degrees), None) => {
+                    Some(Transformation::rotate(Radians(degrees.to_radians())))
+                }
+                (None, None) => None,
+            };
+            let scaled = match base {
+                Some(base) if shrink < 1.0 => Some(base.with_scaling(size(shrink, shrink))),
+                Some(base) => Some(base),
+                None if shrink < 1.0 => Some(Transformation::scale(size(shrink, shrink))),
+                None => None,
+            };
+            match scaled {
+                Some(transformation) => svg.with_transformation(transformation).into_any_element(),
+                None => svg.into_any_element(),
+            }
+        });
         let mut button = div()
             .id(self.id)
             .relative()
@@ -522,7 +570,7 @@ impl RenderOnce for IconButton {
             .h(px(height))
             .child(press_layer(
                 press,
-                0.05,
+                depth,
                 radius,
                 look.bg,
                 look.border,
@@ -543,6 +591,10 @@ impl RenderOnce for IconButton {
                     if let Some((_, duration, curve)) = rotation {
                         motion::drive(spin_key, *hovered, duration, curve, window, cx);
                     }
+                    if let Some((track, enter, leave)) = hover_track {
+                        let duration = if *hovered { enter } else { leave };
+                        motion::drive(track, *hovered, duration, motion::LINEAR, window, cx);
+                    }
                     if let Some((pulse, duration)) = pulse {
                         if *hovered {
                             motion::restart(pulse, duration, window, cx);
@@ -552,6 +604,19 @@ impl RenderOnce for IconButton {
                     }
                 },
             );
+            if let Some((_, press_in)) = press_rotation {
+                let release = rotation.map_or(press_in, |(_, duration, _)| duration);
+                button = button
+                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                        motion::drive(press_spin_key, true, press_in, STANDARD, window, cx);
+                    })
+                    .on_mouse_up(MouseButton::Left, move |_, window, cx| {
+                        motion::drive(press_spin_key, false, release, STANDARD, window, cx);
+                    })
+                    .on_mouse_up_out(MouseButton::Left, move |_, window, cx| {
+                        motion::drive(press_spin_key, false, release, STANDARD, window, cx);
+                    });
+            }
             if let Some(handler) = self.on_secondary {
                 button = button.on_mouse_down(MouseButton::Right, move |event, window, cx| {
                     let click = ClickEvent::Mouse(gpui::MouseClickEvent {
