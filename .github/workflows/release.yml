@@ -7,6 +7,9 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   guard:
     runs-on: ubuntu-latest
@@ -15,13 +18,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Read AppVersion
+      - name: Read version
         id: version
         run: |
-          appv="$(sed -nE 's/^const AppVersion = "(.*)"$/\1/p' internal/update/updater.go)"
-          echo "AppVersion=$appv"
+          appv="$(sed -nE '/^\[workspace.package\]/,/^\[/ s/^version = "(.*)"$/\1/p' Cargo.toml)"
+          echo "version=$appv"
           if [ -z "$appv" ]; then
-            echo "::error::failed to read AppVersion from internal/update/updater.go"
+            echo "::error::failed to read workspace version from Cargo.toml"
             exit 1
           fi
           echo "app_version=$appv" >> "$GITHUB_OUTPUT"
@@ -29,46 +32,39 @@ jobs:
   windows:
     needs: guard
     runs-on: windows-latest
-    env:
-      GOTOOLCHAIN: local
-      CGO_ENABLED: "0"
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
 
       - name: Build
-        shell: bash
-        run: go build -trimpath -ldflags "-s -w -H=windowsgui -buildid=" -o out/AccountChanger.exe .
+        run: cargo build --release --locked -p accountchanger
 
       - uses: actions/upload-artifact@v7
         with:
           name: windows
-          path: out/AccountChanger.exe
+          path: target/release/AccountChanger.exe
           if-no-files-found: error
 
   linux:
     needs: guard
-    runs-on: ubuntu-latest
-    container: golang:1.25-bookworm
-    env:
-      GOTOOLCHAIN: local
-      CGO_ENABLED: "1"
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
 
       - name: Dependencies
         run: |
-          apt-get update -qq
-          apt-get install -y -qq --no-install-recommends pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
-
-      - name: Trust workspace
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends pkg-config cmake libxkbcommon-x11-dev libwayland-dev libvulkan-dev libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libasound2-dev
 
       - name: Build
-        run: go build -trimpath -ldflags "-s -w -buildid=" -o out/AccountChanger-linux-x86_64 .
+        run: |
+          cargo build --release --locked -p accountchanger
+          mkdir -p out
+          cp target/release/AccountChanger out/AccountChanger-linux-x86_64
+          chmod 0755 out/AccountChanger-linux-x86_64
 
       - uses: actions/upload-artifact@v7
         with:

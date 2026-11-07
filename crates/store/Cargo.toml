@@ -1,0 +1,23 @@
+[package]
+name = "ac-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ac-platform.workspace = true
+base64.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

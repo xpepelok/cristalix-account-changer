@@ -1,0 +1,52 @@
+[package]
+name = "accountchanger"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "AccountChanger"
+path = "src/main.rs"
+
+[features]
+mock = []
+
+[dependencies]
+ac-api.workspace = true
+ac-core.workspace = true
+ac-platform.workspace = true
+ac-skin.workspace = true
+anyhow.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+futures = { version = "0.3", default-features = false, features = ["std", "alloc", "async-await", "executor"] }
+gpui = "0.2.2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+parking_lot.workspace = true
+raw-window-handle = "0.6"
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
+serde_json.workspace = true
+rodio = { version = "0.21", default-features = false, features = ["playback"] }
+smallvec = "1"
+
+[target.'cfg(windows)'.dependencies]
+tray-icon = "0.21"
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_HiDpi",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[dev-dependencies]
+gpui = { version = "0.2.2", features = ["test-support"] }
+
+[lints]
+workspace = true

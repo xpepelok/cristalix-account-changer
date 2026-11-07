@@ -1,0 +1,57 @@
+[workspace]
+resolver = "3"
+members = [
+    "apps/accountchanger",
+    "crates/api",
+    "crates/core",
+    "crates/launcher",
+    "crates/platform",
+    "crates/player",
+    "crates/skin",
+    "crates/stats",
+    "crates/store",
+    "crates/update",
+]
+
+[workspace.package]
+version = "0.4.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+repository = "https://github.com/xpepelok/cristalix-account-changer"
+
+[workspace.dependencies]
+ac-api = { path = "crates/api" }
+ac-core = { path = "crates/core" }
+ac-launcher = { path = "crates/launcher" }
+ac-platform = { path = "crates/platform" }
+ac-player = { path = "crates/player" }
+ac-skin = { path = "crates/skin" }
+ac-stats = { path = "crates/stats" }
+ac-store = { path = "crates/store" }
+ac-update = { path = "crates/update" }
+anyhow = "1"
+base64 = "0.22"
+parking_lot = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "gzip"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "macros", "migrate"] }
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "fs", "macros", "process"] }
+tracing = "0.1"
+
+[workspace.lints.rust]
+unused = { level = "warn", priority = -1 }
+unsafe_op_in_unsafe_fn = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

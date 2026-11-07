@@ -32,3 +32,5 @@ trace_addon.py
 cristalix_trace.txt
 *.upx
 *.exe.upx
+
+/target/

@@ -1,0 +1,32 @@
+[package]
+name = "ac-launcher"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ac-api.workspace = true
+ac-platform.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+notify = { version = "8", default-features = false }
+parking_lot.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
+zip = { version = "2", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+base64.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true
