@@ -99,41 +99,40 @@ pub(crate) async fn import(
     let mut tx = pool.begin().await?;
     let mut imported = Vec::new();
 
-    if let Some(bytes) = read(&paths.vault) {
-        if let Ok(plain) = secrets.decrypt(&bytes)
-            && let Ok(data) = serde_json::from_slice::<VaultData>(&plain)
-        {
-            import_vault(&mut tx, secrets, data).await?;
-            imported.push(&paths.vault);
-        }
+    if let Some(bytes) = read(&paths.vault)
+        && let Ok(plain) = secrets.decrypt(&bytes)
+        && let Ok(data) = serde_json::from_slice::<VaultData>(&plain)
+    {
+        import_vault(&mut tx, secrets, data).await?;
+        imported.push(&paths.vault);
     }
 
-    if let Some(bytes) = read(&paths.config) {
-        if let Ok(config) = serde_json::from_slice::<LegacyConfig>(&bytes) {
-            import_config(&mut tx, config).await?;
-            imported.push(&paths.config);
-        }
+    if let Some(bytes) = read(&paths.config)
+        && let Ok(config) = serde_json::from_slice::<LegacyConfig>(&bytes)
+    {
+        import_config(&mut tx, config).await?;
+        imported.push(&paths.config);
     }
 
-    if let Some(bytes) = read(&paths.players) {
-        if let Ok(entries) = serde_json::from_slice::<HashMap<String, LegacyPlayerEntry>>(&bytes) {
-            import_players(&mut tx, entries).await?;
-            imported.push(&paths.players);
-        }
+    if let Some(bytes) = read(&paths.players)
+        && let Ok(entries) = serde_json::from_slice::<HashMap<String, LegacyPlayerEntry>>(&bytes)
+    {
+        import_players(&mut tx, entries).await?;
+        imported.push(&paths.players);
     }
 
-    if let Some(bytes) = read(&paths.session) {
-        if let Ok(launches) = serde_json::from_slice::<Vec<LegacyLaunch>>(&bytes) {
-            import_launches(&mut tx, launches).await?;
-            imported.push(&paths.session);
-        }
+    if let Some(bytes) = read(&paths.session)
+        && let Ok(launches) = serde_json::from_slice::<Vec<LegacyLaunch>>(&bytes)
+    {
+        import_launches(&mut tx, launches).await?;
+        imported.push(&paths.session);
     }
 
-    if let Some(bytes) = read(&paths.logs) {
-        if let Ok(clients) = serde_json::from_slice::<HashMap<String, LegacyLogClient>>(&bytes) {
-            import_logs(&mut tx, clients).await?;
-            imported.push(&paths.logs);
-        }
+    if let Some(bytes) = read(&paths.logs)
+        && let Ok(clients) = serde_json::from_slice::<HashMap<String, LegacyLogClient>>(&bytes)
+    {
+        import_logs(&mut tx, clients).await?;
+        imported.push(&paths.logs);
     }
 
     tx.commit().await?;
