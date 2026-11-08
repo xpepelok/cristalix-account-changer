@@ -70,6 +70,9 @@ fn main() -> anyhow::Result<()> {
         }
     };
     let backend = backend(&options)?;
+    if !options.mock {
+        ac_platform::install_desktop_entry(assets::APP_ICON_PNG).ok();
+    }
 
     Application::new()
         .with_assets(Assets)
