@@ -9,6 +9,7 @@ pub mod model;
 mod players;
 mod settings;
 mod store;
+mod uuid;
 
 pub use error::{Result, StoreError};
 pub use jwt::{Claims, JwtError};
@@ -19,3 +20,4 @@ pub use model::{
     LogSummary, PlayerCacheEntry, Settings, Theme,
 };
 pub use store::Store;
+pub use uuid::canonical_uuid;

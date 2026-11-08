@@ -51,6 +51,7 @@ impl Store {
             let _ = std::fs::remove_file(db_path);
             return Err(err);
         }
+        crate::uuid::repair(&pool).await?;
         let store = Self {
             pool,
             secrets,

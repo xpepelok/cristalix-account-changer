@@ -331,6 +331,71 @@ async fn migrates_legacy_vault_and_config() {
 }
 
 #[tokio::test]
+async fn merges_accounts_stored_without_dashes() {
+    const DASHED: &str = "e376c8f4-72ec-11e9-8374-1cb72caa35fd";
+    const BARE: &str = "e376c8f472ec11e983741cb72caa35fd";
+    const ALONE: &str = "3e7839e2a26911edb93f1cb72cb014ae";
+    let fx = Fixture::new();
+    {
+        let store = fx.open().await;
+        store
+            .upsert_token("Dreams", "older", &claims(DASHED, 100))
+            .await
+            .unwrap();
+        store.set_label(DASHED, "main").await.unwrap();
+        store
+            .upsert_token("Dreams", "newer", &claims(BARE, 200))
+            .await
+            .unwrap();
+        store.set_pinned(BARE, true).await.unwrap();
+        store
+            .upsert_token("Solo", "solo", &claims(ALONE, 100))
+            .await
+            .unwrap();
+        let group = store.create_group("Team").await.unwrap().unwrap();
+        store.add_group_member(&group.id, DASHED).await.unwrap();
+        store.add_group_member(&group.id, BARE).await.unwrap();
+        store.add_group_member(&group.id, ALONE).await.unwrap();
+        store.begin_log_session(BARE, "Dreams").await.unwrap();
+    }
+
+    let store = fx.open().await;
+    assert!(store.get(BARE).is_none());
+    assert!(store.get(ALONE).is_none());
+    let merged = store.get(DASHED).unwrap();
+    assert_eq!(merged.token, "newer");
+    assert_eq!(merged.expires, 200);
+    assert_eq!(merged.label, "main");
+    assert!(merged.pinned);
+    let renamed = store.get("3e7839e2-a269-11ed-b93f-1cb72cb014ae").unwrap();
+    assert_eq!(renamed.token, "solo");
+    let mut members = store.sorted_groups()[0].members.clone();
+    members.sort();
+    assert_eq!(
+        members,
+        vec![
+            "3e7839e2-a269-11ed-b93f-1cb72cb014ae".to_owned(),
+            DASHED.to_owned()
+        ]
+    );
+    let summaries = store.log_summaries().await.unwrap();
+    assert!(summaries.iter().all(|summary| summary.uuid != BARE));
+}
+
+#[test]
+fn jwt_uuid_is_canonical() {
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    let payload = r#"{"uuid":"E376C8F472EC11E983741CB72CAA35FD","exp":7}"#;
+    let token = format!("h.{}.s", URL_SAFE_NO_PAD.encode(payload));
+    assert_eq!(
+        jwt::parse(&token).unwrap().uuid,
+        "e376c8f4-72ec-11e9-8374-1cb72caa35fd"
+    );
+}
+
+#[tokio::test]
 async fn keeps_unreadable_legacy_vault() {
     let fx = Fixture::new();
     std::fs::write(&fx.paths.vault, b"not a sealed vault").unwrap();

@@ -43,9 +43,12 @@ pub fn parse(token: &str) -> Result<Claims, JwtError> {
         .decode(payload)
         .or_else(|_| STANDARD.decode(payload))
         .map_err(|_| JwtError::Payload)?;
-    let claims: Claims = serde_json::from_slice(&bytes).map_err(|_| JwtError::Payload)?;
+    let mut claims: Claims = serde_json::from_slice(&bytes).map_err(|_| JwtError::Payload)?;
     if claims.uuid.is_empty() {
         return Err(JwtError::MissingUuid);
+    }
+    if let Some(canonical) = crate::uuid::canonical_uuid(&claims.uuid) {
+        claims.uuid = canonical;
     }
     Ok(claims)
 }
