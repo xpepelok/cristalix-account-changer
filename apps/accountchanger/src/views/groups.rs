@@ -513,7 +513,7 @@ impl GroupsView {
                     .child(
                         Button::new("groups-create", "Создать группу", ButtonStyle::Primary)
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.create_group_flow(window, cx)
+                                this.create_group_flow(Vec::new(), window, cx)
                             })),
                     ),
             )
@@ -1145,17 +1145,34 @@ impl Shell {
         cx.notify();
     }
 
-    pub(crate) fn create_group_flow(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn create_group_flow(
+        &mut self,
+        members: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.prompt(
             "Название новой группы",
             "",
             GROUP_NAME_MAX_CHARS,
-            |this, name, _, cx| {
-                let future = this.store.read(cx).backend.create_group(name);
+            move |this, name, _, cx| {
+                let backend = this.store.read(cx).backend.clone();
+                let future = backend.create_group(name);
                 cx.spawn(async move |this, cx| {
                     let result = future.await;
+                    if let Ok(group) = &result {
+                        for uuid in &members {
+                            backend
+                                .add_group_member(group.id.clone(), uuid.clone())
+                                .await
+                                .ok();
+                        }
+                    }
                     this.update(cx, |shell, cx| match result {
-                        Ok(group) => {
+                        Ok(mut group) => {
+                            if group.members.is_empty() {
+                                group.members = members;
+                            }
                             shell.store.update(cx, |store, cx| {
                                 if store.group(&group.id).is_none() {
                                     store.groups.push(group.clone());

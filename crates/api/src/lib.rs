@@ -27,6 +27,7 @@ pub use profiles::{
 pub use settings::{
     BACKGROUND_BLUR_MAX, BACKGROUND_DIM_DEFAULT, BACKGROUND_DIM_MAX, BACKGROUND_EXTENSIONS,
     Background, CustomLauncher, LauncherKind, OnlineCounts, OnlineStats, Settings, Theme,
+    VIDEO_EXTENSIONS, VideoBackground, is_video,
 };
 
 #[cfg(test)]

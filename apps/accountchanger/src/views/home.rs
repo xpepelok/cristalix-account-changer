@@ -4,8 +4,9 @@ use std::time::Duration;
 use ac_api::{Account, Group, Rank};
 use gpui::{
     Animation, AnimationExt, AnyElement, App, AppContext, Context, ElementId, Entity, FontWeight,
-    Hsla, InteractiveElement, IntoElement, ParentElement, ScrollHandle, StatefulInteractiveElement,
-    Styled, StyledText, TextRun, Window, deferred, div, prelude::FluentBuilder, px, relative,
+    Hsla, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, ParentElement,
+    ScrollHandle, StatefulInteractiveElement, Styled, StyledText, TextRun, Window, deferred, div,
+    prelude::FluentBuilder, px, relative,
 };
 
 use crate::ambient;
@@ -19,6 +20,7 @@ use crate::ui::{
     Button, ButtonStyle, Checkbox, IconButton, IconStyle, InputEvent, MenuItem, Spinner, TextInput,
     drop_in, menu_item, menu_separator, menu_surface, scrollbar, with_tooltip,
 };
+use crate::views::selection::{Selection, card_probe};
 use crate::views::shell::{Popup, Shell};
 
 pub const CARD_MIN_WIDTH: f32 = 350.0;
@@ -151,6 +153,7 @@ pub struct Home {
     pub seen: HashSet<String>,
     pub generation: u64,
     pub first_render: bool,
+    pub selection: Selection,
 }
 
 impl Home {
@@ -174,6 +177,7 @@ impl Home {
             seen: HashSet::new(),
             generation: 0,
             first_render: true,
+            selection: Selection::default(),
         }
     }
 }
@@ -195,6 +199,7 @@ impl Shell {
 
     pub(crate) fn select_group(&mut self, id: Option<String>, cx: &mut Context<Self>) {
         self.home.group = id;
+        self.home.selection.clear();
         self.home.generation += 1;
         self.home.seen.clear();
         cx.notify();
@@ -636,7 +641,7 @@ impl Shell {
                     .on_click(cx.listener(|this, _, window, cx| {
                         sound::play(Sound::Tap);
                         this.close_popup(cx);
-                        this.create_group_flow(window, cx);
+                        this.create_group_flow(Vec::new(), window, cx);
                     }))
                     .group("group-create")
                     .child(
@@ -867,6 +872,10 @@ impl Shell {
             |account| store.rank(account),
         );
         let uuids: Vec<String> = list.iter().map(|a| a.uuid.clone()).collect();
+        self.prune_selection(cx);
+        self.home.selection.order = uuids.clone();
+        self.home.selection.cards.borrow_mut().clear();
+        let cards = self.home.selection.cards.clone();
         let accounts: Vec<Account> = list.into_iter().cloned().collect();
         let max_offset = f32::from(self.home.scroll.max_offset().height);
         let overflows = max_offset > 0.5;
@@ -899,7 +908,16 @@ impl Shell {
                     Duration::ZERO
                 };
                 let cell = enter(
-                    div().flex_1().min_w_0().child(card),
+                    div()
+                        .relative()
+                        .flex_1()
+                        .min_w_0()
+                        .child(card)
+                        .child(card_probe(
+                            cards.clone(),
+                            self.home.scroll.clone(),
+                            account.uuid.clone(),
+                        )),
                     &account.uuid,
                     generation,
                     delay,
@@ -985,6 +1003,11 @@ impl Shell {
                 .into_any_element()
         };
 
+        self.sync_pick_motion(window, cx);
+        let marquee = self.render_drag_overlay(cx);
+        let bar = self.render_selection_bar(window, cx);
+        let listeners = self.selection_listeners(cx);
+
         div()
             .relative()
             .flex()
@@ -1000,11 +1023,18 @@ impl Shell {
                     .overflow_y_scroll()
                     .track_scroll(&self.home.scroll)
                     .on_scroll_wheel(cx.listener(|this, _, _, cx| this.close_card_menu(cx)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                            this.selection_down(event, cx)
+                        }),
+                    )
                     .pt(px(8.0))
                     .pb(px(10.0))
                     .when(overflows, |s| s.pr(px(SCROLLBAR_WIDTH)))
                     .child(body),
             )
+            .children(marquee)
             .children(scrollbar(
                 "acc-scrollbar",
                 &self.home.scroll,
@@ -1012,6 +1042,8 @@ impl Shell {
                 0.0,
                 cx,
             ))
+            .children(bar)
+            .children(listeners)
             .into_any_element()
     }
 

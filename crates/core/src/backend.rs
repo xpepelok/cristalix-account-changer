@@ -7,7 +7,7 @@ use ac_api::{
     CustomLauncher, EventStream, Group, GroupLaunchProgress, ImportProgress, LaunchSettings,
     LauncherKind, LogStats, LogSummary, LogView, OnlineStats, PlayerInfo, ProfileFiles, Profiles,
     QueueEntry, SavedProfile, Settings, Status, TextureKind, Theme, UpdateInfo, UpdateProgress,
-    msg, normalize_label,
+    VideoBackground, msg, normalize_label,
 };
 use ac_launcher::{
     JAR_LAUNCHER_URL, LAUNCHER_URL, MINIMAL_PROFILE, STAFF_LAUNCHER_URL, current_client,
@@ -123,11 +123,7 @@ impl Inner {
     }
 
     async fn set_background(&self, source: Option<PathBuf>) -> ApiResult<Option<String>> {
-        let previous = self.store.background();
         let Some(source) = source else {
-            if let Some(previous) = &previous {
-                let _ = tokio::fs::remove_file(self.paths.data.join(previous)).await;
-            }
             self.store
                 .set_background(None)
                 .await
@@ -137,28 +133,62 @@ impl Inner {
                 .await
                 .ok();
             self.store.set_background_blur(0).await.ok();
+            self.sweep_backgrounds(None).await;
             return Ok(None);
         };
-        let bytes = tokio::fs::read(&source)
-            .await
-            .map_err(|err| ApiError::new(err.to_string()))?;
         let extension = source
             .extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or("png")
             .to_ascii_lowercase();
-        let file = format!("{BACKGROUND_FILE}.{extension}");
-        tokio::fs::write(self.paths.data.join(&file), bytes)
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_millis());
+        let file = format!("{BACKGROUND_FILE}-{stamp}.{extension}");
+        tokio::fs::copy(&source, self.paths.data.join(&file))
             .await
             .map_err(|err| ApiError::new(err.to_string()))?;
-        if let Some(previous) = previous.filter(|previous| previous != &file) {
-            let _ = tokio::fs::remove_file(self.paths.data.join(previous)).await;
-        }
         self.store
             .set_background(Some(file.clone()))
             .await
             .map_err(|_| ApiError::fixed(msg::GENERIC))?;
+        self.sweep_backgrounds(Some(&file)).await;
         Ok(Some(file))
+    }
+
+    async fn sweep_backgrounds(&self, keep: Option<&str>) {
+        let Ok(mut entries) = tokio::fs::read_dir(&self.paths.data).await else {
+            return;
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            let ours = name
+                .strip_prefix(BACKGROUND_FILE)
+                .is_some_and(|rest| rest.starts_with('.') || rest.starts_with('-'));
+            if ours && Some(name) != keep {
+                let _ = tokio::fs::remove_file(entry.path()).await;
+            }
+        }
+    }
+
+    async fn background_video(&self) -> ApiResult<Option<VideoBackground>> {
+        let Some(file) = self
+            .store
+            .background()
+            .filter(|file| ac_api::is_video(file))
+        else {
+            return Ok(None);
+        };
+        let ffmpeg = crate::ffmpeg::ensure(&self.paths.data)
+            .await
+            .map_err(|err| ApiError::new(format!("Не удалось скачать FFmpeg: {err:#}")))?;
+        Ok(Some(VideoBackground {
+            ffmpeg,
+            file: self.paths.data.join(file),
+        }))
     }
 
     async fn close_group(&self, id: &str) -> ApiResult<u32> {
@@ -696,6 +726,10 @@ impl Backend for Core {
 
     fn background_image(&self) -> ApiFuture<Option<Vec<u8>>> {
         self.with(|inner| async move { Ok(inner.background_bytes().await) })
+    }
+
+    fn background_video(&self) -> ApiFuture<Option<VideoBackground>> {
+        self.with(|inner| async move { inner.background_video().await })
     }
 
     fn online_stats(&self) -> ApiFuture<OnlineStats> {

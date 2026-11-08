@@ -1,5 +1,6 @@
 use ac_api::{
     BACKGROUND_BLUR_MAX, BACKGROUND_DIM_MAX, BACKGROUND_EXTENSIONS, LauncherKind, Os, Settings,
+    VIDEO_EXTENSIONS,
 };
 use gpui::{
     AnyElement, Context, FontWeight, InteractiveElement, IntoElement, ParentElement, SharedString,
@@ -405,7 +406,7 @@ impl SettingsView {
                                     .child(if has_file {
                                         "Установлен".to_owned()
                                     } else {
-                                        "PNG, JPG, WEBP или GIF".to_owned()
+                                        "Картинка, GIF или видео".to_owned()
                                     }),
                             ),
                     )
@@ -641,7 +642,16 @@ impl Shell {
         cx.spawn(async move |_, cx| {
             let Some(file) = rfd::AsyncFileDialog::new()
                 .set_title("Фон приложения")
-                .add_filter("Изображения", &BACKGROUND_EXTENSIONS)
+                .add_filter(
+                    "Картинки и видео",
+                    &[
+                        BACKGROUND_EXTENSIONS.as_slice(),
+                        VIDEO_EXTENSIONS.as_slice(),
+                    ]
+                    .concat(),
+                )
+                .add_filter("Картинки", &BACKGROUND_EXTENSIONS)
+                .add_filter("Видео", &VIDEO_EXTENSIONS)
                 .pick_file()
                 .await
             else {

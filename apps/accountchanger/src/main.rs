@@ -13,6 +13,7 @@ mod sound;
 mod state;
 mod theme;
 mod ui;
+mod video;
 mod views;
 
 use std::sync::Arc;

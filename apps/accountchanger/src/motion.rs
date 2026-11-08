@@ -168,6 +168,17 @@ pub fn drive(
     window.refresh();
 }
 
+pub fn sync(key: Key, on: bool, duration: Duration, curve: [f32; 4], cx: &mut App) -> bool {
+    let to = if on { 1.0 } else { 0.0 };
+    let motion = cx.default_global::<Motion>();
+    let current = motion.tracks.get(&key).map_or(0.0, |track| track.to);
+    if current == to {
+        return false;
+    }
+    motion.drive(key, on, duration, curve);
+    true
+}
+
 pub fn release_hovers(cx: &mut App) {
     if let Some(motion) = cx.try_global::<Motion>()
         && motion

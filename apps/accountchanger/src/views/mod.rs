@@ -7,6 +7,7 @@ pub mod import;
 pub mod logs;
 pub mod notifications;
 pub mod profiles;
+pub mod selection;
 pub mod settings;
 pub mod shell;
 pub mod stats;

@@ -4,6 +4,24 @@ pub const BACKGROUND_DIM_DEFAULT: u8 = 55;
 pub const BACKGROUND_DIM_MAX: u8 = 100;
 pub const BACKGROUND_BLUR_MAX: u8 = 40;
 pub const BACKGROUND_EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "webp", "gif"];
+pub const VIDEO_EXTENSIONS: [&str; 15] = [
+    "mp4", "m4v", "mov", "webm", "mkv", "avi", "wmv", "flv", "mpg", "mpeg", "ts", "m2ts", "3gp",
+    "ogv", "apng",
+];
+
+pub fn is_video(file: &str) -> bool {
+    file.rsplit_once('.').is_some_and(|(_, extension)| {
+        VIDEO_EXTENSIONS
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(extension))
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VideoBackground {
+    pub ffmpeg: std::path::PathBuf,
+    pub file: std::path::PathBuf,
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

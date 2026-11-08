@@ -1,7 +1,7 @@
 use ac_api::{Account, TokenState};
 use gpui::{
-    Context, ElementId, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement,
-    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
+    Context, ElementId, FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
 };
 
 use crate::assets::{Icon, icon};
@@ -10,6 +10,7 @@ use crate::motion::{self, Key};
 use crate::sound::{self, Sound};
 use crate::theme::{ThemeExt, mix, rem, rgba, shadow};
 use crate::ui::{Avatar, Badge, Chip, IconButton, IconStyle, Spinner, fit, with_tooltip};
+use crate::views::selection::{PICK, PICK_POP, SELECTING};
 use crate::views::shell::{Popup, Shell};
 
 pub const AVATAR_SIZE: f32 = 46.0;
@@ -106,7 +107,12 @@ impl Shell {
             }
         });
         let dot_tip = status.as_ref().map(|s| s.text.clone());
-        let surface = mix(p.surface, p.surface_2, hover);
+        let pick = motion::value(Key::new(PICK, &uuid), cx);
+        let pop = motion::value(Key::new(PICK_POP, &uuid), cx);
+        let selecting = motion::value(Key::of(SELECTING), cx);
+        let tint = Hsla { a: 1.0, ..p.blue };
+        let surface = mix(mix(p.surface, p.surface_2, hover), tint, 0.09 * pick);
+        let mark_shown = selecting.max(hover).max(pick).min(1.0);
 
         let avatar = div()
             .relative()
@@ -129,6 +135,41 @@ impl Shell {
                     None => dot.into_any_element(),
                 };
                 wrap.child(dot)
+            })
+            .when(mark_shown > 0.01, |wrap| {
+                let toggled = uuid.clone();
+                wrap.child(
+                    div()
+                        .id(ElementId::Name(format!("pick-{uuid}").into()))
+                        .absolute()
+                        .left(px(-6.0))
+                        .top(px(-6.0))
+                        .p(px(2.0))
+                        .rounded(px(7.0))
+                        .bg(surface)
+                        .opacity(mark_shown)
+                        .cursor_pointer()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.toggle_picked(&toggled, cx);
+                        }))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_none()
+                                .items_center()
+                                .justify_center()
+                                .size(px(18.0))
+                                .rounded(px(5.0))
+                                .border(px(1.5))
+                                .border_color(mix(p.line_strong, tint, pick))
+                                .bg(Hsla { a: pick, ..tint })
+                                .when(pop > 0.02, |mark| {
+                                    mark.child(icon(Icon::Check, px(13.0 * pop), p.white))
+                                }),
+                        ),
+                )
             });
 
         let pin_key = Key::new("card-pin", &uuid);
@@ -315,23 +356,51 @@ impl Shell {
             .py(px(13.0))
             .rounded(px(12.0))
             .border_1()
-            .border_color(mix(p.line, p.line_strong, hover))
+            .border_color(mix(
+                mix(p.line, p.line_strong, hover),
+                mix(tint, p.blue_hover, hover),
+                pick,
+            ))
             .bg(surface)
-            .shadow(shadow(0.0, 6.0, 22.0, 0.0, rgba(0x000000, 0.28 * hover)))
+            .shadow(shadow(
+                0.0,
+                6.0,
+                22.0,
+                0.0,
+                mix(
+                    rgba(0x000000, 0.28 * hover),
+                    rgba(0x3b82e8, 0.16 + 0.12 * hover),
+                    pick,
+                ),
+            ))
             .cursor_pointer()
             .on_hover(move |hovered, window, cx| motion::hover(key, *hovered, window, cx))
-            .on_click(cx.listener(move |this, _, window, cx| {
-                sound::play(Sound::Tap);
-                this.open_account(open_uuid.clone(), window, cx);
-            }))
+            .on_click(
+                cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
+                    if this.selection_click(&open_uuid, event.modifiers(), cx) {
+                        return;
+                    }
+                    sound::play(Sound::Tap);
+                    this.open_account(open_uuid.clone(), window, cx);
+                }),
+            )
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
-                    this.popup = Some(Popup::Card {
-                        uuid: menu_uuid.clone(),
-                        x: f32::from(event.position.x),
-                        y: f32::from(event.position.y),
-                    });
+                    let x = f32::from(event.position.x);
+                    let y = f32::from(event.position.y);
+                    let selection = &this.home.selection;
+                    this.popup = Some(
+                        if selection.contains(&menu_uuid) && selection.picked.len() > 1 {
+                            Popup::Selection { x, y, full: true }
+                        } else {
+                            Popup::Card {
+                                uuid: menu_uuid.clone(),
+                                x,
+                                y,
+                            }
+                        },
+                    );
                     cx.notify();
                 }),
             )

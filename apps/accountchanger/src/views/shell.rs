@@ -20,6 +20,7 @@ use crate::theme::{
 use crate::ui::{
     MenuItem, Tooltips, drop_in, menu_item, menu_separator, menu_surface, tooltip_overlay,
 };
+use crate::video::VideoPlayer;
 use crate::views::account::AccountView;
 use crate::views::dialogs::{ConfirmView, PromptView};
 use crate::views::groups::{AddMembersView, GroupsView, LaunchSettingsView};
@@ -29,7 +30,9 @@ use crate::views::logs::LogsView;
 use crate::views::profiles::{ProfileImportView, ProfilesView};
 use crate::views::settings::SettingsView;
 use crate::views::stats::StatsView;
+use futures::StreamExt;
 
+const VIDEO_NOTICE: Duration = Duration::from_millis(600);
 const DISMISS_GRACE: Duration = Duration::from_millis(250);
 const DROP_OUT: Duration = Duration::from_millis(120);
 const MODAL_OUT: Duration = Duration::from_millis(180);
@@ -54,6 +57,11 @@ pub enum Popup {
         x: f32,
         y: f32,
     },
+    Selection {
+        x: f32,
+        y: f32,
+        full: bool,
+    },
 }
 
 impl Popup {
@@ -74,6 +82,7 @@ impl Popup {
             Self::Dropdown(id) => id,
             Self::Card { .. } => "card",
             Self::LogSession { .. } => "log-session",
+            Self::Selection { .. } => "selection",
         }
     }
 }
@@ -166,6 +175,7 @@ impl Shell {
     fn update_ambient(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let live = window.is_window_active();
         ambient::set_live(live, cx);
+        self.backdrop.set_live(live);
         if live && self.ambient_task.is_none() {
             self.ambient_task = Some(cx.spawn(async move |this, cx| {
                 loop {
@@ -184,6 +194,10 @@ impl Shell {
     fn sync_backdrop(&mut self, store: &Entity<Store>, cx: &mut Context<Self>) {
         let settings = store.read(cx).settings.background.clone();
         if let Some(load) = self.backdrop.plan(&settings) {
+            if ac_api::is_video(&load.file) {
+                self.load_video(load, store, cx);
+                return;
+            }
             let future = store.read(cx).backend.background_image();
             cx.spawn(async move |this, cx| {
                 let bytes = future.await.ok().flatten();
@@ -204,6 +218,86 @@ impl Shell {
             })
             .detach();
         }
+    }
+
+    fn load_video(
+        &mut self,
+        load: background::Load,
+        store: &Entity<Store>,
+        cx: &mut Context<Self>,
+    ) {
+        let future = store.read(cx).backend.background_video();
+        let store = store.clone();
+        cx.spawn(async move |this, cx| {
+            let waiting = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let notice = waiting.clone();
+            let toast_store = store.clone();
+            cx.spawn(async move |cx| {
+                cx.background_executor().timer(VIDEO_NOTICE).await;
+                if notice.load(std::sync::atomic::Ordering::Relaxed) {
+                    toast_store
+                        .update(cx, |store, cx| {
+                            store.toast("Скачиваю FFmpeg для видео-фона (~30 МБ)…", false, cx)
+                        })
+                        .ok();
+                }
+            })
+            .detach();
+            let result = future.await;
+            waiting.store(false, std::sync::atomic::Ordering::Relaxed);
+            let started = match result {
+                Ok(Some(source)) => match VideoPlayer::start(&source, load.blur) {
+                    Ok(started) => Some(started),
+                    Err(error) => {
+                        store
+                            .update(cx, |store, cx| {
+                                store.toast(
+                                    format!("Не удалось запустить видео: {error}"),
+                                    true,
+                                    cx,
+                                )
+                            })
+                            .ok();
+                        None
+                    }
+                },
+                Ok(None) => None,
+                Err(error) => {
+                    store
+                        .update(cx, |store, cx| {
+                            store.toast(error.message().to_owned(), true, cx)
+                        })
+                        .ok();
+                    None
+                }
+            };
+            let (player, mut frames) = match started {
+                Some((player, frames)) => (Some(player), Some(frames)),
+                None => (None, None),
+            };
+            let playing = this
+                .update(cx, |shell, cx| {
+                    shell.backdrop_task = None;
+                    let playing = shell.backdrop.finish_video(load, player);
+                    shell.backdrop.set_live(ambient::is_live(cx));
+                    cx.notify();
+                    playing
+                })
+                .unwrap_or(false);
+            let Some(frames) = frames.as_mut().filter(|_| playing) else {
+                return;
+            };
+            while let Some(frame) = frames.next().await {
+                let alive = this.update(cx, |shell, cx| {
+                    shell.backdrop.push_frame(frame);
+                    cx.notify();
+                });
+                if alive.is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     fn animate_backdrop(&mut self, cx: &mut Context<Self>) {
@@ -237,6 +331,7 @@ impl Shell {
         Tooltips::dismiss(cx);
         crate::platform::window::hide(window);
         ambient::set_live(false, cx);
+        self.backdrop.set_live(false);
         self.ambient_task = None;
     }
 
@@ -340,7 +435,7 @@ impl Shell {
     pub(crate) fn close_card_menu(&mut self, cx: &mut Context<Self>) {
         if matches!(
             self.popup,
-            Some(Popup::Card { .. } | Popup::LogSession { .. })
+            Some(Popup::Card { .. } | Popup::LogSession { .. } | Popup::Selection { .. })
         ) {
             self.set_popup(None);
             cx.notify();
@@ -377,7 +472,9 @@ impl Shell {
         }
         if let Some(overlay) = self.overlays.pop() {
             self.retire(overlay, window, cx);
+            return;
         }
+        self.clear_selection(cx);
     }
 
     pub(crate) fn toggle_theme(&mut self, cx: &mut Context<Self>) {
@@ -446,6 +543,20 @@ impl Shell {
             && !keystroke.modifiers.shift
             && (keystroke.key == "c" || keystroke.key == "a")
             && self.copy_log_selection(keystroke.key == "a", cx)
+        {
+            cx.stop_propagation();
+        } else if keystroke.modifiers.control
+            && !keystroke.modifiers.shift
+            && keystroke.key == "a"
+            && self.overlays.is_empty()
+            && !self.home.search.read(cx).is_focused(window)
+        {
+            self.select_all(cx);
+            cx.stop_propagation();
+        } else if keystroke.key == "delete"
+            && self.overlays.is_empty()
+            && !self.home.search.read(cx).is_focused(window)
+            && self.forget_selected(window, cx)
         {
             cx.stop_propagation();
         } else if keystroke.key == "e" && keystroke.modifiers.control && keystroke.modifiers.shift {
@@ -863,6 +974,9 @@ impl Render for Shell {
                 x,
                 y,
             }) => self.render_log_session_menu(session, label, x, y, window, cx),
+            Some(Popup::Selection { x, y, full }) => {
+                self.render_selection_menu(x, y, full, window, cx)
+            }
             _ => None,
         };
         let overlays = self.render_overlays(window, cx);

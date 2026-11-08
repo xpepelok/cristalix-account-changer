@@ -10,6 +10,7 @@ use image::imageops::FilterType;
 use image::{AnimationDecoder, ImageFormat, RgbaImage};
 
 use crate::skin::to_render_image;
+use crate::video::VideoPlayer;
 
 const MAX_EDGE: u32 = 2560;
 const ANIMATED_MAX_EDGE: u32 = 1920;
@@ -53,6 +54,8 @@ pub struct Backdrop {
     image: Option<Prepared>,
     started: Option<Instant>,
     retired: Vec<Arc<RenderImage>>,
+    player: Option<VideoPlayer>,
+    video_frame: Option<Arc<RenderImage>>,
 }
 
 impl Backdrop {
@@ -85,7 +88,39 @@ impl Backdrop {
         self.image = image;
     }
 
+    pub fn finish_video(&mut self, load: Load, player: Option<VideoPlayer>) -> bool {
+        if self.pending.as_ref() != Some(&load) {
+            return false;
+        }
+        self.pending = None;
+        self.loaded = Some(load);
+        self.retire();
+        self.started = Some(Instant::now());
+        self.player = player;
+        self.player.is_some()
+    }
+
+    pub fn push_frame(&mut self, frame: Arc<RenderImage>) {
+        if self.player.is_none() {
+            self.retired.push(frame);
+            return;
+        }
+        if let Some(previous) = self.video_frame.replace(frame) {
+            self.retired.push(previous);
+        }
+    }
+
+    pub fn set_live(&self, live: bool) {
+        if let Some(player) = &self.player {
+            player.set_live(live);
+        }
+    }
+
     fn retire(&mut self) {
+        self.player = None;
+        if let Some(frame) = self.video_frame.take() {
+            self.retired.push(frame);
+        }
         if let Some(prepared) = self.image.take() {
             self.retired
                 .extend(prepared.frames.into_iter().map(|(frame, _)| frame));
@@ -107,13 +142,17 @@ impl Backdrop {
 
     pub fn image(&self, settings: &Background) -> Option<(Arc<RenderImage>, f32)> {
         settings.file.as_ref()?;
+        let dim = f32::from(settings.dim.min(100)) / 100.0;
+        if let Some(frame) = &self.video_frame {
+            return Some((frame.clone(), dim));
+        }
         let prepared = self.image.as_ref()?;
         let index = match self.started {
             Some(started) if prepared.animated() => prepared.position(started.elapsed()).0,
             _ => 0,
         };
         let frame = prepared.frames[index].0.clone();
-        Some((frame, f32::from(settings.dim.min(100)) / 100.0))
+        Some((frame, dim))
     }
 }
 

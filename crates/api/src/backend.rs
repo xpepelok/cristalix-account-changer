@@ -7,7 +7,7 @@ use crate::{
     Account, ApiResult, BackendEvent, Caps, Clients, Credentials, CustomLauncher, Group,
     GroupLaunchProgress, ImportProgress, LaunchSettings, LauncherKind, LogStats, LogSummary,
     LogView, OnlineStats, PlayerInfo, ProfileFiles, Profiles, QueueEntry, SavedProfile, Settings,
-    Status, TextureKind, Theme, UpdateInfo, UpdateProgress,
+    Status, TextureKind, Theme, UpdateInfo, UpdateProgress, VideoBackground,
 };
 
 pub type ApiFuture<T> = BoxFuture<'static, ApiResult<T>>;
@@ -72,6 +72,7 @@ pub trait Backend: Send + Sync + 'static {
     fn set_background_dim(&self, dim: u8) -> ApiFuture<()>;
     fn set_background_blur(&self, blur: u8) -> ApiFuture<()>;
     fn background_image(&self) -> ApiFuture<Option<Vec<u8>>>;
+    fn background_video(&self) -> ApiFuture<Option<VideoBackground>>;
 
     fn online_stats(&self) -> ApiFuture<OnlineStats>;
     fn logs(&self) -> ApiFuture<Vec<LogSummary>>;

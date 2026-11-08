@@ -16,9 +16,12 @@ ac-store.workspace = true
 ac-update.workspace = true
 anyhow.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+flate2 = "1"
 futures = { version = "0.3", default-features = false, features = ["std", "alloc"] }
 parking_lot.workspace = true
+reqwest.workspace = true
 serde_json.workspace = true
+sha2 = "0.10"
 tokio.workspace = true
 
 [dev-dependencies]

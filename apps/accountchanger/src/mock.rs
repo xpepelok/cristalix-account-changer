@@ -999,6 +999,10 @@ impl Backend for MockBackend {
         self.with(|world| Ok(world.background.clone()))
     }
 
+    fn background_video(&self) -> ApiFuture<Option<ac_api::VideoBackground>> {
+        self.with(|_| Ok(None))
+    }
+
     fn online_stats(&self) -> ApiFuture<OnlineStats> {
         self.with(|world| {
             Ok(if world.settings.stats {
