@@ -97,11 +97,16 @@ pub fn mix(from: Hsla, to: Hsla, t: f32) -> Hsla {
     }
     let a: Rgba = from.into();
     let b: Rgba = to.into();
+    let alpha = a.a + (b.a - a.a) * t;
+    if alpha <= f32::EPSILON {
+        return Hsla { a: 0.0, ..to };
+    }
+    let channel = |x: f32, y: f32| (x * a.a + (y * b.a - x * a.a) * t) / alpha;
     Rgba {
-        r: a.r + (b.r - a.r) * t,
-        g: a.g + (b.g - a.g) * t,
-        b: a.b + (b.b - a.b) * t,
-        a: a.a + (b.a - a.a) * t,
+        r: channel(a.r, b.r),
+        g: channel(a.g, b.g),
+        b: channel(a.b, b.b),
+        a: alpha,
     }
     .into()
 }
@@ -241,6 +246,13 @@ mod tests {
         assert_eq!(parse_hex("#fff"), Some(rgb(0xffffff)));
         assert_eq!(parse_hex("e3a400"), None);
         assert_eq!(parse_hex("#zzzzzz"), None);
+    }
+
+    #[test]
+    fn mix_fades_through_transparent_without_darkening() {
+        let half: Rgba = mix(rgba(0x000000, 0.0), rgb(0xffffff), 0.5).into();
+        assert!((half.a - 0.5).abs() < 1e-4);
+        assert!(half.r > 0.999 && half.g > 0.999 && half.b > 0.999);
     }
 
     #[test]

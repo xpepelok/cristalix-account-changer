@@ -276,7 +276,8 @@ impl Shell {
                     .pulse(THEME_POP, Duration::from_millis(600))
                     .tooltip(theme_tip)
                     .sound(None)
-                    .on_click(cx.listener(|this, _, window, cx| {
+                    .on_click(cx.listener(|this, event: &gpui::ClickEvent, window, cx| {
+                        let origin = event.position();
                         let light = this.store.read(cx).settings.theme == Theme::Dark;
                         motion::drive(
                             THEME_SWAP,
@@ -286,7 +287,7 @@ impl Shell {
                             window,
                             cx,
                         );
-                        this.toggle_theme(cx);
+                        this.toggle_theme(origin, window, cx);
                     })),
             )
             .child(

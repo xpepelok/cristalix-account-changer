@@ -66,22 +66,18 @@ pub struct Filters {
 }
 
 impl Filters {
-    pub fn count(&self, sort: Option<Sort>) -> usize {
-        self.ranks.len()
-            + usize::from(self.no_rank)
-            + usize::from(self.expired)
-            + usize::from(sort.is_some())
+    pub fn count(&self, sorts: &[Sort]) -> usize {
+        self.ranks.len() + usize::from(self.no_rank) + usize::from(self.expired) + sorts.len()
     }
 }
 
-pub fn next_sort(current: Option<Sort>, key: SortKey) -> Option<Sort> {
-    match current {
-        Some(sort) if sort.key == key && !sort.ascending => Some(Sort {
-            key,
-            ascending: true,
-        }),
-        Some(sort) if sort.key == key => None,
-        _ => Some(Sort {
+pub fn toggle_sort(sorts: &mut Vec<Sort>, key: SortKey) {
+    match sorts.iter().position(|sort| sort.key == key) {
+        Some(index) if !sorts[index].ascending => sorts[index].ascending = true,
+        Some(index) => {
+            sorts.remove(index);
+        }
+        None => sorts.push(Sort {
             key,
             ascending: false,
         }),
@@ -92,7 +88,7 @@ pub fn visible<'a>(
     accounts: &'a [Account],
     group: Option<&Group>,
     filters: &Filters,
-    sort: Option<Sort>,
+    sorts: &[Sort],
     query: &str,
     debug_expired: bool,
     rank: impl Fn(&Account) -> Option<Rank>,
@@ -113,14 +109,20 @@ pub fn visible<'a>(
             !filters.expired || (account.launchable && (debug_expired || account.expired))
         })
         .collect();
-    if let Some(sort) = sort {
+    if !sorts.is_empty() {
         base.sort_by(|a, b| {
-            let order = sort.key.value(a).cmp(&sort.key.value(b));
-            if sort.ascending {
-                order
-            } else {
-                order.reverse()
-            }
+            sorts
+                .iter()
+                .map(|sort| {
+                    let order = sort.key.value(a).cmp(&sort.key.value(b));
+                    if sort.ascending {
+                        order
+                    } else {
+                        order.reverse()
+                    }
+                })
+                .find(|order| order.is_ne())
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
     }
     let total = base.len();
@@ -147,7 +149,7 @@ pub struct Home {
     pub query: String,
     pub group: Option<String>,
     pub filters: Filters,
-    pub sort: Option<Sort>,
+    pub sort: Vec<Sort>,
     pub debug_expired: bool,
     pub scroll: ScrollHandle,
     pub seen: HashSet<String>,
@@ -171,7 +173,7 @@ impl Home {
             query: String::new(),
             group: None,
             filters: Filters::default(),
-            sort: None,
+            sort: Vec::new(),
             debug_expired: false,
             scroll: ScrollHandle::new(),
             seen: HashSet::new(),
@@ -327,7 +329,7 @@ impl Shell {
         let group = self.active_group(store).cloned();
         let progress = store.group_launch.clone();
         let profiles = store.profiles.profiles.clone();
-        let count = self.home.filters.count(self.home.sort);
+        let count = self.home.filters.count(&self.home.sort);
         let menu_open = self.popup_shown(&Popup::GroupMenu) == Some(None);
         let menu_shown = self.popup_shown(&Popup::GroupMenu).is_some();
         let filter_open = self.popup_shown(&Popup::Filter) == Some(None);
@@ -685,7 +687,8 @@ impl Shell {
         let store = self.store.read(cx);
         let ranks = rank_labels(store);
         let filters = self.home.filters.clone();
-        let sort = self.home.sort;
+        let sort = self.home.sort.clone();
+        let ranked = sort.len() > 1;
         let title = |text: &'static str| {
             div()
                 .px(px(6.0))
@@ -772,7 +775,8 @@ impl Shell {
             .child(menu_separator(&p, 4.0, 8.0))
             .child(title("Сортировка"));
         for (key, label) in SortKey::ALL {
-            let active = sort.filter(|s| s.key == key);
+            let priority = sort.iter().position(|s| s.key == key);
+            let active = priority.map(|index| sort[index]);
             let arrow_key = Key::new("sort-arrow", label);
             let down = matches!(
                 active,
@@ -799,10 +803,27 @@ impl Shell {
                     })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         sound::play(Sound::Tap);
-                        this.home.sort = next_sort(this.home.sort, key);
+                        toggle_sort(&mut this.home.sort, key);
                         cx.notify();
                     }))
                     .child(div().flex_1().child(label))
+                    .when_some(priority.filter(|_| ranked), |row, index| {
+                        row.child(
+                            div()
+                                .flex()
+                                .flex_none()
+                                .items_center()
+                                .justify_center()
+                                .size(px(16.0))
+                                .mr(px(6.0))
+                                .rounded_full()
+                                .bg(rgba(0x3b82e8, 0.2))
+                                .text_size(rem(0.62))
+                                .font(crate::theme::tabular(FontWeight::BOLD))
+                                .text_color(p.active_text)
+                                .child(gpui::SharedString::from((index + 1).to_string())),
+                        )
+                    })
                     .child(
                         icon(
                             Icon::ArrowUp,
@@ -835,7 +856,7 @@ impl Shell {
                 .on_click(cx.listener(|this, _, _, cx| {
                     sound::play(Sound::Tap);
                     this.home.filters = Filters::default();
-                    this.home.sort = None;
+                    this.home.sort.clear();
                     cx.notify();
                 }))
                 .child(icon(
@@ -866,7 +887,7 @@ impl Shell {
             &store.accounts,
             group,
             &self.home.filters,
-            self.home.sort,
+            &self.home.sort,
             &self.home.query,
             self.home.debug_expired,
             |account| store.rank(account),
@@ -1504,27 +1525,62 @@ mod tests {
     }
 
     #[test]
-    fn sort_cycles_desc_asc_off() {
-        let first = next_sort(None, SortKey::Added);
+    fn sort_cycles_desc_asc_off_per_key() {
+        let mut sorts = Vec::new();
+        toggle_sort(&mut sorts, SortKey::Added);
+        toggle_sort(&mut sorts, SortKey::Expiry);
         assert_eq!(
-            first,
-            Some(Sort {
-                key: SortKey::Added,
-                ascending: false
-            })
+            sorts,
+            [
+                Sort {
+                    key: SortKey::Added,
+                    ascending: false
+                },
+                Sort {
+                    key: SortKey::Expiry,
+                    ascending: false
+                }
+            ]
         );
-        let second = next_sort(first, SortKey::Added);
-        assert_eq!(
-            second,
-            Some(Sort {
+        toggle_sort(&mut sorts, SortKey::Added);
+        assert!(sorts[0].ascending);
+        toggle_sort(&mut sorts, SortKey::Added);
+        assert_eq!(sorts.len(), 1);
+        assert_eq!(sorts[0].key, SortKey::Expiry);
+    }
+
+    #[test]
+    fn later_sorts_break_ties() {
+        let mut accounts = vec![
+            account("1", "a", 10),
+            account("2", "b", 10),
+            account("3", "c", 20),
+        ];
+        accounts[0].first_seen = 1;
+        accounts[1].first_seen = 5;
+        accounts[2].first_seen = 3;
+        let sorts = [
+            Sort {
+                key: SortKey::Launched,
+                ascending: false,
+            },
+            Sort {
                 key: SortKey::Added,
-                ascending: true
-            })
+                ascending: false,
+            },
+        ];
+        let (sorted, _) = visible(
+            &accounts,
+            None,
+            &Filters::default(),
+            &sorts,
+            "",
+            false,
+            |_| None,
         );
-        assert_eq!(next_sort(second, SortKey::Added), None);
         assert_eq!(
-            next_sort(second, SortKey::Expiry).unwrap().key,
-            SortKey::Expiry
+            sorted.iter().map(|a| a.uuid.as_str()).collect::<Vec<_>>(),
+            ["3", "2", "1"]
         );
     }
 
@@ -1535,25 +1591,19 @@ mod tests {
             account("2", "beta", 30),
             account("3", "Gamma", 20),
         ];
-        let (all, total) = visible(
-            &accounts,
-            None,
-            &Filters::default(),
-            None,
-            "",
-            false,
-            |_| None,
-        );
+        let (all, total) = visible(&accounts, None, &Filters::default(), &[], "", false, |_| {
+            None
+        });
         assert_eq!((all.len(), total), (3, 3));
-        let sort = Some(Sort {
+        let sort = [Sort {
             key: SortKey::Launched,
             ascending: false,
-        });
+        }];
         let (sorted, _) = visible(
             &accounts,
             None,
             &Filters::default(),
-            sort,
+            &sort,
             "",
             false,
             |_| None,
@@ -1566,7 +1616,7 @@ mod tests {
             &accounts,
             None,
             &Filters::default(),
-            None,
+            &[],
             "BET",
             false,
             |_| None,
@@ -1580,7 +1630,7 @@ mod tests {
             &accounts,
             Some(&group),
             &Filters::default(),
-            None,
+            &[],
             "",
             false,
             |_| None,
@@ -1590,7 +1640,7 @@ mod tests {
             no_rank: true,
             ..Filters::default()
         };
-        let (no_rank, _) = visible(&accounts, None, &filters, None, "", false, |a| {
+        let (no_rank, _) = visible(&accounts, None, &filters, &[], "", false, |a| {
             (a.uuid == "1").then(|| Rank {
                 label: "VIP".into(),
                 color: "#fff".into(),

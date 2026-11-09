@@ -4,9 +4,9 @@ use std::time::{Duration, Instant};
 use ac_api::Theme;
 use gpui::{
     AnimationExt, AnyElement, App, Context, Entity, FocusHandle, Focusable, FontWeight,
-    InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render, RenderImage,
-    SharedString, StatefulInteractiveElement, Styled, StyledImage, Subscription, Task, Window,
-    deferred, div, img, prelude::FluentBuilder, px, relative,
+    InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Pixels, Point, Render,
+    RenderImage, SharedString, StatefulInteractiveElement, Styled, StyledImage, Subscription, Task,
+    Window, deferred, div, img, prelude::FluentBuilder, px, relative,
 };
 
 use crate::ambient;
@@ -33,6 +33,8 @@ use crate::views::stats::StatsView;
 use futures::StreamExt;
 
 const VIDEO_NOTICE: Duration = Duration::from_millis(600);
+const WAVE_GROW: Duration = Duration::from_millis(480);
+const WAVE_FADE: Duration = Duration::from_millis(260);
 const DISMISS_GRACE: Duration = Duration::from_millis(250);
 const DROP_OUT: Duration = Duration::from_millis(120);
 const MODAL_OUT: Duration = Duration::from_millis(180);
@@ -103,6 +105,13 @@ pub enum Overlay {
     Confirm(ConfirmView),
 }
 
+struct ThemeWave {
+    origin: Point<Pixels>,
+    started: Instant,
+    to: Theme,
+    applied: bool,
+}
+
 pub struct Shell {
     pub store: Entity<Store>,
     pub home: Home,
@@ -119,6 +128,7 @@ pub struct Shell {
     font: SharedString,
     ambient_task: Option<Task<()>>,
     backdrop_task: Option<Task<()>>,
+    theme_wave: Option<ThemeWave>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -168,6 +178,7 @@ impl Shell {
             font,
             ambient_task: None,
             backdrop_task: None,
+            theme_wave: None,
             _subscriptions: subscriptions,
         }
     }
@@ -477,20 +488,94 @@ impl Shell {
         self.clear_selection(cx);
     }
 
-    pub(crate) fn toggle_theme(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_theme(
+        &mut self,
+        origin: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(wave) = self.theme_wave.take()
+            && !wave.applied
+        {
+            crate::theme::install(wave.to, cx);
+        }
         let theme = self.store.read(cx).settings.theme.toggled();
         sound::play(if theme == Theme::Light {
             Sound::ThemeLight
         } else {
             Sound::ThemeDark
         });
-        crate::theme::install(theme, cx);
         self.store.update(cx, |store, cx| {
             store.settings.theme = theme;
             let future = store.backend.set_theme(theme);
             store.act(cx, future, "");
         });
-        cx.refresh_windows();
+        self.theme_wave = Some(ThemeWave {
+            origin,
+            started: Instant::now(),
+            to: theme,
+            applied: false,
+        });
+        window.refresh();
+    }
+
+    fn render_theme_wave(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let wave = self.theme_wave.as_mut()?;
+        let elapsed = wave.started.elapsed();
+        if !wave.applied && elapsed >= WAVE_GROW {
+            wave.applied = true;
+            crate::theme::install(wave.to, cx);
+            cx.refresh_windows();
+        }
+        if elapsed >= WAVE_GROW + WAVE_FADE {
+            self.theme_wave = None;
+            return None;
+        }
+        window.request_animation_frame();
+        let viewport = window.viewport_size();
+        let (x, y) = (f32::from(wave.origin.x), f32::from(wave.origin.y));
+        let (width, height) = (f32::from(viewport.width), f32::from(viewport.height));
+        let reach = x.max(width - x).hypot(y.max(height - y)) + 2.0;
+        let grow = motion::cubic_bezier(
+            motion::EASE_IN_OUT,
+            (elapsed.as_secs_f32() / WAVE_GROW.as_secs_f32()).min(1.0),
+        );
+        let fade = if wave.applied {
+            1.0 - motion::cubic_bezier(
+                motion::EASE_OUT,
+                ((elapsed - WAVE_GROW).as_secs_f32() / WAVE_FADE.as_secs_f32()).min(1.0),
+            )
+        } else {
+            1.0
+        };
+        let radius = reach * grow;
+        let color = crate::theme::Palette::for_theme(wave.to).graphite;
+        Some(
+            deferred(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px(x - radius))
+                            .top(px(y - radius))
+                            .size(px(radius * 2.0))
+                            .rounded_full()
+                            .bg(color)
+                            .opacity(fade),
+                    ),
+            )
+            .with_priority(20)
+            .into_any_element(),
+        )
     }
 
     pub(crate) fn open_launcher(&mut self, cx: &mut Context<Self>) {
@@ -982,6 +1067,7 @@ impl Render for Shell {
         let overlays = self.render_overlays(window, cx);
         let toast = self.render_toast(window, cx);
         let tooltip = tooltip_overlay(window, cx).map(|tip| deferred(tip).with_priority(10));
+        let wave = self.render_theme_wave(window, cx);
 
         div()
             .id("shell")
@@ -1023,5 +1109,6 @@ impl Render for Shell {
             .children(overlays)
             .children(toast)
             .children(tooltip)
+            .children(wave)
     }
 }
