@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use gpui::{App, Global};
 
-pub const FRAME: Duration = Duration::from_millis(50);
+pub const FRAME: Duration = Duration::from_millis(16);
 
 pub struct Ambient {
     origin: Instant,

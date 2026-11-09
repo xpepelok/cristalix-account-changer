@@ -1,4 +1,5 @@
 pub mod account;
+pub mod cabinet;
 pub mod card;
 pub mod dialogs;
 pub mod groups;

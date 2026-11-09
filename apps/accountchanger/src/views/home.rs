@@ -26,6 +26,7 @@ use crate::views::shell::{Popup, Shell};
 pub const CARD_MIN_WIDTH: f32 = 350.0;
 pub const GRID_GAP: f32 = 12.0;
 const SCROLLBAR_WIDTH: f32 = 8.0;
+const HEARTBEAT: Duration = Duration::from_millis(1150);
 const TELEGRAM_URL: &str = "https://t.me/xpplkn";
 const AUTHOR_URL: &str = "https://top.cristalix.gg/profile/Pepel_ok";
 
@@ -1071,7 +1072,7 @@ impl Shell {
     fn render_footer(&mut self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let p = cx.palette();
         let shimmer = ambient::cycle(Duration::from_secs(7), cx).unwrap_or(0.0);
-        let heart = ambient::cycle(Duration::from_millis(2600), cx).unwrap_or(0.0);
+        let heart = ambient::cycle(HEARTBEAT, cx).unwrap_or(0.0);
         let key = Key::of("footer-name");
         let hover = motion::value(key, cx);
         let name = "xpepelok";
@@ -1094,10 +1095,18 @@ impl Shell {
             })
             .collect();
         let pulse = motion::keyframes(
-            &[(0.0, 0.0), (0.5, 1.0), (1.0, 0.0)],
+            &[
+                (0.0, 0.0),
+                (0.1, 1.0),
+                (0.2, 0.3),
+                (0.3, 0.8),
+                (0.46, 0.0),
+                (1.0, 0.0),
+            ],
             heart,
             motion::EASE_IN_OUT,
         );
+        let beat = 1.0 + 0.24 * pulse;
         div()
             .flex_none()
             .flex()
@@ -1150,9 +1159,11 @@ impl Shell {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .text_color(rgb(0xe0564f))
-                            .text_size(rem(0.78 * (1.0 + 0.14 * pulse)))
-                            .child("♥"),
+                            .child(
+                                icon(Icon::Heart, px(11.0), rgb(0xe0564f)).with_transformation(
+                                    gpui::Transformation::scale(gpui::size(beat, beat)),
+                                ),
+                            ),
                     ),
             )
     }

@@ -1,13 +1,100 @@
+use std::collections::HashMap;
+use std::time::Instant;
+
 use gpui::{
-    AnyElement, App, AppContext, Context, ElementId, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Render, RenderOnce, ScrollHandle, StatefulInteractiveElement, Styled, Window,
-    div, point, prelude::FluentBuilder, px,
+    AnyElement, App, AppContext, Context, DispatchPhase, ElementId, Global, HitboxBehavior,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Render, RenderOnce, ScrollDelta,
+    ScrollHandle, ScrollWheelEvent, StatefulInteractiveElement, Styled, Window, canvas, div, point,
+    prelude::FluentBuilder, px,
 };
 
 use crate::motion::{self, Key};
 use crate::theme::ThemeExt;
 
 const MIN_THUMB: f32 = 24.0;
+const GLIDE: f32 = 15.0;
+const GLIDE_STEP: f32 = 0.05;
+const SETTLE: f32 = 0.5;
+
+struct Glide {
+    target: f32,
+    last: Instant,
+}
+
+#[derive(Default)]
+struct Glides(HashMap<ElementId, Glide>);
+
+impl Global for Glides {}
+
+fn advance(id: &ElementId, handle: &ScrollHandle, window: &mut Window, cx: &mut App) {
+    if !cx
+        .try_global::<Glides>()
+        .is_some_and(|glides| glides.0.contains_key(id))
+    {
+        return;
+    }
+    let glides = cx.global_mut::<Glides>();
+    let Some(glide) = glides.0.get_mut(id) else {
+        return;
+    };
+    let now = Instant::now();
+    let step = now.duration_since(glide.last).as_secs_f32().min(GLIDE_STEP);
+    glide.last = now;
+    let max = f32::from(handle.max_offset().height);
+    glide.target = glide.target.clamp(0.0, max);
+    let offset = handle.offset();
+    let current = -f32::from(offset.y);
+    let gap = glide.target - current;
+    if gap.abs() < SETTLE {
+        handle.set_offset(point(offset.x, px(-glide.target)));
+        glides.0.remove(id);
+        return;
+    }
+    let next = current + gap * (1.0 - (-GLIDE * step).exp());
+    handle.set_offset(point(offset.x, px(-next)));
+    window.request_animation_frame();
+}
+
+fn wheel(id: ElementId, handle: ScrollHandle) -> impl IntoElement {
+    let bounds_handle = handle.clone();
+    canvas(
+        move |_, window, _| window.insert_hitbox(bounds_handle.bounds(), HitboxBehavior::Normal),
+        move |_, hitbox, window, _| {
+            window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+                if phase != DispatchPhase::Bubble || !hitbox.should_handle_scroll(window) {
+                    return;
+                }
+                let ScrollDelta::Lines(lines) = event.delta else {
+                    if let Some(glides) = cx.try_global::<Glides>()
+                        && glides.0.contains_key(&id)
+                    {
+                        cx.global_mut::<Glides>().0.remove(&id);
+                    }
+                    return;
+                };
+                let max = f32::from(handle.max_offset().height);
+                if max <= SETTLE || lines.y == 0.0 {
+                    return;
+                }
+                let current = -f32::from(handle.offset().y);
+                let distance = lines.y * f32::from(window.line_height());
+                let glide = cx
+                    .default_global::<Glides>()
+                    .0
+                    .entry(id.clone())
+                    .or_insert(Glide {
+                        target: current,
+                        last: Instant::now(),
+                    });
+                glide.target = (glide.target - distance).clamp(0.0, max);
+                cx.stop_propagation();
+                window.refresh();
+            });
+        },
+    )
+    .absolute()
+    .size_0()
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Thumb {
@@ -140,9 +227,11 @@ impl ScrollArea {
 }
 
 impl RenderOnce for ScrollArea {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        advance(&self.id, &self.handle, window, cx);
         let bar_id = ElementId::Name(format!("{}-bar", self.id).into());
         let bar = scrollbar(bar_id, &self.handle, self.bar_width, self.bar_inset, cx);
+        let wheel = wheel(self.id.clone(), self.handle.clone());
         div()
             .relative()
             .flex()
@@ -158,6 +247,7 @@ impl RenderOnce for ScrollArea {
                     .min_h_0()
                     .overflow_y_scroll()
                     .track_scroll(&self.handle)
+                    .child(wheel)
                     .children(self.content),
             )
             .children(bar)

@@ -92,29 +92,42 @@ pub fn tooltip_overlay(window: &mut Window, cx: &mut App) -> Option<impl IntoEle
     let anchor = state.bounds?;
     let p = cx.palette();
     let font_size = rem(0.76);
-    let run = TextRun {
-        len: text.len(),
-        font: gpui::Font {
-            weight: FontWeight::MEDIUM,
-            ..gpui::font(crate::theme::FONT_FAMILY)
-        },
-        color: p.text,
-        background_color: None,
-        underline: None,
-        strikethrough: None,
+    let lines: Vec<SharedString> = text
+        .split('\n')
+        .map(|line| SharedString::from(line.to_owned()))
+        .collect();
+    let line_width = |line: &SharedString| {
+        let run = TextRun {
+            len: line.len(),
+            font: gpui::Font {
+                weight: FontWeight::MEDIUM,
+                ..gpui::font(crate::theme::FONT_FAMILY)
+            },
+            color: p.text,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        f32::from(
+            window
+                .text_system()
+                .shape_line(line.clone(), font_size, &[run], None)
+                .width,
+        )
+        .ceil()
+            + PAD_X * 2.0
+            + 4.0
     };
-    let text_width = f32::from(
-        window
-            .text_system()
-            .shape_line(text.clone(), font_size, &[run], None)
-            .width,
-    );
+    let natural: Vec<f32> = lines.iter().map(line_width).collect();
     let viewport = window.viewport_size();
     let vw = f32::from(viewport.width);
-    let natural = text_width.ceil() + PAD_X * 2.0 + 4.0;
-    let width = natural.min(MAX_WIDTH);
-    let wraps = natural > MAX_WIDTH;
-    let height = f32::from(font_size) * LINE * if wraps { 2.0 } else { 1.0 } + PAD_Y * 2.0 + 2.0;
+    let width = natural.iter().copied().fold(0.0, f32::max).min(MAX_WIDTH);
+    let wraps = natural.iter().any(|line| *line > MAX_WIDTH);
+    let rows: f32 = natural
+        .iter()
+        .map(|line| if *line > MAX_WIDTH { 2.0 } else { 1.0 })
+        .sum();
+    let height = f32::from(font_size) * LINE * rows + PAD_Y * 2.0 + 2.0;
     let center = f32::from(anchor.origin.x) + f32::from(anchor.size.width) / 2.0;
     let left = (center - width / 2.0).max(EDGE).min(vw - width - EDGE);
     let above = f32::from(anchor.origin.y) - GAP - height;
@@ -141,7 +154,9 @@ pub fn tooltip_overlay(window: &mut Window, cx: &mut App) -> Option<impl IntoEle
             .line_height(gpui::relative(LINE))
             .text_color(p.text)
             .when(!wraps, |tip| tip.whitespace_nowrap())
-            .child(text)
+            .flex()
+            .flex_col()
+            .children(lines.into_iter().map(|line| div().child(line)))
             .with_animation(
                 gpui::ElementId::Name(format!("tooltip-{key:?}").into()),
                 gpui::Animation::new(std::time::Duration::from_millis(120))

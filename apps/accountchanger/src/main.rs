@@ -3,6 +3,7 @@
 mod ambient;
 mod assets;
 mod background;
+mod cabinet_login;
 mod format;
 #[cfg(feature = "mock")]
 mod mock;
@@ -29,6 +30,9 @@ use gpui::{
 use crate::assets::Assets;
 use crate::platform::instance;
 use crate::views::shell::Shell;
+
+const MIN_WIDTH: f32 = 810.0;
+const MIN_HEIGHT: f32 = 600.0;
 
 struct Options {
     mock: bool,
@@ -91,7 +95,7 @@ fn main() -> anyhow::Result<()> {
                         traffic_light_position: None,
                     }),
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    window_min_size: Some(size(px(480.0), px(420.0))),
+                    window_min_size: Some(size(px(MIN_WIDTH), px(MIN_HEIGHT))),
                     app_id: Some("AccountChanger".to_owned()),
                     ..WindowOptions::default()
                 },

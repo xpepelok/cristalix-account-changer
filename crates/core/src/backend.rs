@@ -3,11 +3,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use ac_api::{
-    Account, ApiError, ApiFuture, ApiResult, Backend, BackendEvent, Caps, Clients, Credentials,
-    CustomLauncher, EventStream, Group, GroupLaunchProgress, ImportProgress, LaunchSettings,
-    LauncherKind, LogStats, LogSummary, LogView, OnlineStats, PlayerInfo, ProfileFiles, Profiles,
-    QueueEntry, SavedProfile, Settings, Status, TextureKind, Theme, UpdateInfo, UpdateProgress,
-    VideoBackground, msg, normalize_label,
+    Account, ApiError, ApiFuture, ApiResult, Backend, BackendEvent, CabinetStatus, Caps, Clients,
+    Credentials, CustomLauncher, EventStream, Group, GroupLaunchProgress, ImportProgress,
+    LaunchSettings, LauncherKind, LogStats, LogSummary, LogView, OnlineStats, PlayerInfo,
+    ProfileFiles, Profiles, QueueEntry, SavedProfile, Settings, Status, TextureKind, Theme,
+    UpdateInfo, UpdateProgress, VideoBackground, msg, normalize_label,
 };
 use ac_launcher::{
     JAR_LAUNCHER_URL, LAUNCHER_URL, MINIMAL_PROFILE, STAFF_LAUNCHER_URL, current_client,
@@ -730,6 +730,67 @@ impl Backend for Core {
 
     fn background_video(&self) -> ApiFuture<Option<VideoBackground>> {
         self.with(|inner| async move { inner.background_video().await })
+    }
+
+    fn cabinet_status(&self, uuid: String) -> ApiFuture<CabinetStatus> {
+        self.with(move |inner| async move {
+            let session = inner
+                .store
+                .cabinet_session(&uuid)
+                .await
+                .map_err(|_| ApiError::fixed(msg::GENERIC))?
+                .ok_or_else(|| ApiError::fixed(msg::CABINET_SESSION))?;
+            match crate::cabinet::fetch_status(&inner.cabinet_http, &session).await {
+                Ok(status) => Ok(status),
+                Err(err) => {
+                    if err.message() == msg::CABINET_SESSION {
+                        inner.store.set_cabinet_session(&uuid, "").await.ok();
+                    }
+                    Err(err)
+                }
+            }
+        })
+    }
+
+    fn has_cabinet_session(&self, uuid: String) -> ApiFuture<bool> {
+        self.with(move |inner| async move {
+            Ok(inner
+                .store
+                .cabinet_session(&uuid)
+                .await
+                .map(|session| session.is_some())
+                .unwrap_or(false))
+        })
+    }
+
+    fn set_cabinet_session(&self, uuid: String, session: String) -> ApiFuture<()> {
+        self.with(move |inner| async move {
+            inner
+                .store
+                .set_cabinet_session(&uuid, &session)
+                .await
+                .map_err(|_| ApiError::fixed(msg::GENERIC))
+        })
+    }
+
+    fn clear_cabinet_session(&self, uuid: String) -> ApiFuture<()> {
+        self.with(move |inner| async move {
+            inner
+                .store
+                .set_cabinet_session(&uuid, "")
+                .await
+                .map_err(|_| ApiError::fixed(msg::GENERIC))
+        })
+    }
+
+    fn account_password(&self, uuid: String) -> ApiFuture<Option<String>> {
+        self.with(move |inner| async move { Ok(inner.store.password(&uuid).await.unwrap_or(None)) })
+    }
+
+    fn cabinet_sessions(&self) -> ApiFuture<Vec<String>> {
+        self.with(
+            |inner| async move { Ok(inner.store.cabinet_sessions().await.unwrap_or_default()) },
+        )
     }
 
     fn online_stats(&self) -> ApiFuture<OnlineStats> {

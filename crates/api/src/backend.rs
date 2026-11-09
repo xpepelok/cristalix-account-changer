@@ -4,8 +4,8 @@ use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 
 use crate::{
-    Account, ApiResult, BackendEvent, Caps, Clients, Credentials, CustomLauncher, Group,
-    GroupLaunchProgress, ImportProgress, LaunchSettings, LauncherKind, LogStats, LogSummary,
+    Account, ApiResult, BackendEvent, CabinetStatus, Caps, Clients, Credentials, CustomLauncher,
+    Group, GroupLaunchProgress, ImportProgress, LaunchSettings, LauncherKind, LogStats, LogSummary,
     LogView, OnlineStats, PlayerInfo, ProfileFiles, Profiles, QueueEntry, SavedProfile, Settings,
     Status, TextureKind, Theme, UpdateInfo, UpdateProgress, VideoBackground,
 };
@@ -73,6 +73,12 @@ pub trait Backend: Send + Sync + 'static {
     fn set_background_blur(&self, blur: u8) -> ApiFuture<()>;
     fn background_image(&self) -> ApiFuture<Option<Vec<u8>>>;
     fn background_video(&self) -> ApiFuture<Option<VideoBackground>>;
+    fn cabinet_status(&self, uuid: String) -> ApiFuture<CabinetStatus>;
+    fn has_cabinet_session(&self, uuid: String) -> ApiFuture<bool>;
+    fn set_cabinet_session(&self, uuid: String, session: String) -> ApiFuture<()>;
+    fn clear_cabinet_session(&self, uuid: String) -> ApiFuture<()>;
+    fn account_password(&self, uuid: String) -> ApiFuture<Option<String>>;
+    fn cabinet_sessions(&self) -> ApiFuture<Vec<String>>;
 
     fn online_stats(&self) -> ApiFuture<OnlineStats>;
     fn logs(&self) -> ApiFuture<Vec<LogSummary>>;

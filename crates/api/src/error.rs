@@ -51,6 +51,7 @@ pub mod msg {
     pub const PROFILE_BUILTIN_READONLY: &str = "встроенный профиль нельзя редактировать";
     pub const PROFILE_BUILTIN_UNDELETABLE: &str = "встроенный профиль нельзя удалить";
     pub const NO_UPDATE: &str = "нет доступного обновления";
+    pub const CABINET_SESSION: &str = "сессия истекла, войди в кабинет заново";
     pub const GROUP_NOT_FOUND: &str = "группа не найдена";
     pub const GROUP_EMPTY: &str = "в группе нет аккаунтов";
     pub const GROUP_NAME_EMPTY: &str = "пустое название";

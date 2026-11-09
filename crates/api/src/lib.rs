@@ -1,5 +1,6 @@
 mod account;
 mod backend;
+mod cabinet;
 mod error;
 mod event;
 mod groups;
@@ -15,6 +16,7 @@ pub use account::{
     TokenState, normalize_label, snap_ram,
 };
 pub use backend::{ApiFuture, Backend, EventStream};
+pub use cabinet::{CabinetStatus, PunishmentKind, Segment, Violation};
 pub use error::{ApiError, ApiResult, msg};
 pub use event::BackendEvent;
 pub use groups::{GROUP_NAME_MAX_CHARS, Group, GroupLaunchProgress, GroupSkip};

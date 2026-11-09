@@ -6,7 +6,7 @@ mod time;
 mod uuid;
 
 pub use error::{PlayerError, TextureError};
-pub use info::{PlayerInfo, Presence};
+pub use info::{PlayerInfo, Presence, formatted_segments};
 pub use service::{
     CACHE_MAX_AGE, CACHE_TTL, CacheEntry, FLUSH_INTERVAL, PlayerService, REFRESH_INTERVAL,
     parse_legacy_cache,

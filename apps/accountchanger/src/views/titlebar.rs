@@ -277,8 +277,8 @@ impl Shell {
                     .tooltip(theme_tip)
                     .sound(None)
                     .on_click(cx.listener(|this, event: &gpui::ClickEvent, window, cx| {
-                        let origin = event.position();
-                        let light = this.store.read(cx).settings.theme == Theme::Dark;
+                        this.toggle_theme(event.position(), window, cx);
+                        let light = this.store.read(cx).settings.theme == Theme::Light;
                         motion::drive(
                             THEME_SWAP,
                             light,
@@ -287,7 +287,6 @@ impl Shell {
                             window,
                             cx,
                         );
-                        this.toggle_theme(origin, window, cx);
                     })),
             )
             .child(
@@ -388,7 +387,7 @@ impl Shell {
                 if event.click_count >= 2 {
                     crate::platform::window::toggle_maximize(window);
                 } else {
-                    window.start_window_move();
+                    crate::platform::window::begin_move(window);
                 }
             })
             .child(

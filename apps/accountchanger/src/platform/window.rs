@@ -118,6 +118,31 @@ pub fn toggle_maximize(window: &mut Window) {
 }
 
 #[cfg(windows)]
+pub fn begin_move(window: &mut Window) {
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        HTCAPTION, PostMessageW, SC_MOVE, WM_SYSCOMMAND,
+    };
+    if let Some(hwnd) = hwnd(window) {
+        unsafe {
+            let _ = ReleaseCapture();
+            let _ = PostMessageW(
+                Some(hwnd),
+                WM_SYSCOMMAND,
+                WPARAM((SC_MOVE | HTCAPTION) as usize),
+                LPARAM(0),
+            );
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn begin_move(window: &mut Window) {
+    window.start_window_move();
+}
+
+#[cfg(windows)]
 pub fn raise_topmost(window: &Window) {
     use windows::Win32::UI::WindowsAndMessaging::{
         HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetForegroundWindow, SetWindowPos,
@@ -136,4 +161,80 @@ pub fn raise_topmost(window: &Window) {
             let _ = SetForegroundWindow(hwnd);
         }
     }
+}
+
+pub struct Snapshot {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<u8>,
+}
+
+#[cfg(windows)]
+pub fn snapshot(window: &Window) -> Option<Snapshot> {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Gdi::{
+        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleBitmap, CreateCompatibleDC,
+        DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC, SelectObject,
+    };
+    use windows::Win32::Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow};
+    use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+
+    const CLIENT_FULL_CONTENT: u32 = 3;
+    let hwnd = hwnd(window)?;
+    unsafe {
+        let mut rect = RECT::default();
+        GetClientRect(hwnd, &mut rect).ok()?;
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+        if width <= 0 || height <= 0 {
+            return None;
+        }
+        let screen = GetDC(None);
+        let memory = CreateCompatibleDC(Some(screen));
+        let bitmap = CreateCompatibleBitmap(screen, width, height);
+        let previous = SelectObject(memory, bitmap.into());
+        let printed = PrintWindow(hwnd, memory, PRINT_WINDOW_FLAGS(CLIENT_FULL_CONTENT)).as_bool();
+        let mut info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut pixels = vec![0u8; width as usize * height as usize * 4];
+        let lines = GetDIBits(
+            memory,
+            bitmap,
+            0,
+            height as u32,
+            Some(pixels.as_mut_ptr().cast()),
+            &mut info,
+            DIB_RGB_COLORS,
+        );
+        SelectObject(memory, previous);
+        let _ = DeleteObject(bitmap.into());
+        let _ = DeleteDC(memory);
+        ReleaseDC(None, screen);
+        if !printed || lines == 0 {
+            return None;
+        }
+        for pixel in pixels.as_chunks_mut::<4>().0 {
+            pixel[3] = 255;
+        }
+        Some(Snapshot {
+            width: width as u32,
+            height: height as u32,
+            pixels,
+        })
+    }
+}
+
+#[cfg(not(windows))]
+pub fn snapshot(_window: &Window) -> Option<Snapshot> {
+    None
 }

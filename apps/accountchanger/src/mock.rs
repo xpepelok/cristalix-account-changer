@@ -1003,6 +1003,30 @@ impl Backend for MockBackend {
         self.with(|_| Ok(None))
     }
 
+    fn cabinet_status(&self, _uuid: String) -> ApiFuture<ac_api::CabinetStatus> {
+        self.with(|_| Ok(ac_api::CabinetStatus::default()))
+    }
+
+    fn has_cabinet_session(&self, _uuid: String) -> ApiFuture<bool> {
+        self.with(|_| Ok(false))
+    }
+
+    fn set_cabinet_session(&self, _uuid: String, _session: String) -> ApiFuture<()> {
+        self.with(|_| Ok(()))
+    }
+
+    fn clear_cabinet_session(&self, _uuid: String) -> ApiFuture<()> {
+        self.with(|_| Ok(()))
+    }
+
+    fn account_password(&self, _uuid: String) -> ApiFuture<Option<String>> {
+        self.with(|_| Ok(None))
+    }
+
+    fn cabinet_sessions(&self) -> ApiFuture<Vec<String>> {
+        self.with(|_| Ok(Vec::new()))
+    }
+
     fn online_stats(&self) -> ApiFuture<OnlineStats> {
         self.with(|world| {
             Ok(if world.settings.stats {

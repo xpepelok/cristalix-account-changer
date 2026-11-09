@@ -50,6 +50,7 @@ pub(crate) struct Inner {
     pub updater: Arc<Updater>,
     pub events: Events,
     pub import: ImportJob,
+    pub cabinet_http: reqwest::Client,
 }
 
 impl Core {
@@ -174,6 +175,9 @@ impl Inner {
             updater: Arc::new(Updater::for_current_exe()?),
             events: Events::default(),
             import: ImportJob::default(),
+            cabinet_http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(15))
+                .build()?,
             paths,
             caps,
             store,

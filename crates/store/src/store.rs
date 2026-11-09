@@ -402,6 +402,72 @@ impl Store {
         Ok(())
     }
 
+    pub async fn set_cabinet_session(&self, uuid: &str, session: &str) -> Result<()> {
+        let saved = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs() as i64);
+        sqlx::query(
+            "INSERT INTO account_auth (uuid, cabinet_session, session_saved) VALUES (?1, ?2, ?3) \
+             ON CONFLICT (uuid) DO UPDATE SET cabinet_session = ?2, session_saved = ?3",
+        )
+        .bind(uuid)
+        .bind(seal(&self.secrets, session)?)
+        .bind(saved)
+        .execute(&self.pool)
+        .await?;
+        self.bump();
+        Ok(())
+    }
+
+    pub async fn cabinet_session(&self, uuid: &str) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT cabinet_session FROM account_auth WHERE uuid = ?1")
+            .bind(uuid)
+            .fetch_optional(&self.pool)
+            .await?;
+        match row {
+            Some(row) => {
+                let session = unseal(&self.secrets, row.try_get("cabinet_session")?)?;
+                Ok((!session.is_empty()).then_some(session))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub async fn cabinet_sessions(&self) -> Result<Vec<String>> {
+        let rows = sqlx::query("SELECT uuid FROM account_auth WHERE cabinet_session IS NOT NULL")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter()
+            .map(|row| Ok(row.try_get("uuid")?))
+            .collect()
+    }
+
+    pub async fn set_password(&self, uuid: &str, password: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO account_auth (uuid, password) VALUES (?1, ?2) \
+             ON CONFLICT (uuid) DO UPDATE SET password = ?2",
+        )
+        .bind(uuid)
+        .bind(seal(&self.secrets, password)?)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn password(&self, uuid: &str) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT password FROM account_auth WHERE uuid = ?1")
+            .bind(uuid)
+            .fetch_optional(&self.pool)
+            .await?;
+        match row {
+            Some(row) => {
+                let password = unseal(&self.secrets, row.try_get("password")?)?;
+                Ok((!password.is_empty()).then_some(password))
+            }
+            None => Ok(None),
+        }
+    }
+
     pub fn settings(&self) -> Settings {
         self.settings.read().clone()
     }

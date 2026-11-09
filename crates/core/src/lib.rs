@@ -1,4 +1,5 @@
 mod backend;
+mod cabinet;
 mod convert;
 mod core;
 mod events;

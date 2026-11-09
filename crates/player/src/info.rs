@@ -237,6 +237,46 @@ pub(crate) fn parse_formatted(text: &str) -> (String, String) {
     (color.unwrap_or_default(), plain.trim().to_owned())
 }
 
+pub fn formatted_segments(text: &str) -> Vec<(String, String)> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut segments: Vec<(String, String)> = Vec::new();
+    let mut color = String::new();
+    let mut index = 0;
+    while index < chars.len() {
+        let current = chars[index];
+        if current == HEX_MARK
+            && let Some(hex) = hex_code(&chars, index)
+        {
+            color = hex;
+            index += 7;
+            continue;
+        }
+        if current == LEGACY_MARK && index + 1 < chars.len() {
+            let code = chars[index + 1];
+            if let Some(legacy) = legacy_color(code) {
+                color = legacy.to_owned();
+            } else if code.eq_ignore_ascii_case(&'r') {
+                color.clear();
+            }
+            index += 2;
+            continue;
+        }
+        match segments.last_mut() {
+            Some((part, last)) if *last == color => part.push(current),
+            _ => segments.push((current.to_string(), color.clone())),
+        }
+        index += 1;
+    }
+    if let Some((part, _)) = segments.first_mut() {
+        *part = part.trim_start().to_owned();
+    }
+    if let Some((part, _)) = segments.last_mut() {
+        *part = part.trim_end().to_owned();
+    }
+    segments.retain(|(part, _)| !part.is_empty());
+    segments
+}
+
 pub(crate) fn color_of_name(formatted: &str, name: &str) -> String {
     let chars: Vec<char> = formatted.chars().collect();
     let target: Vec<char> = name.chars().collect();
@@ -292,6 +332,25 @@ mod tests {
             ("#ff6b6b".to_owned(), "BoldRed".to_owned())
         );
         assert_eq!(parse_formatted("§"), (String::new(), "§".to_owned()));
+    }
+
+    #[test]
+    fn formatted_name_keeps_colors_per_segment() {
+        assert_eq!(
+            formatted_segments("§eV §8┃ §eBelieveInDream"),
+            vec![
+                ("V ".to_owned(), "#ffd43b".to_owned()),
+                ("┃ ".to_owned(), "#868e96".to_owned()),
+                ("BelieveInDream".to_owned(), "#ffd43b".to_owned()),
+            ]
+        );
+        assert_eq!(
+            formatted_segments("\u{a8}60C3A2§lxpepelok§r!"),
+            vec![
+                ("xpepelok".to_owned(), "#60c3a2".to_owned()),
+                ("!".to_owned(), String::new()),
+            ]
+        );
     }
 
     #[test]

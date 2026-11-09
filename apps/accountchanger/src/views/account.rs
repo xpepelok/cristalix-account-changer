@@ -19,12 +19,15 @@ use crate::sound::{self, Sound};
 use crate::theme::{Palette, ThemeExt, alpha, mix, parse_hex, rem, rgb, rgba};
 use crate::ui::{
     Button, ButtonStyle, IconButton, IconStyle, InputEvent, ModalFrame, ScrollArea, Slider,
-    TextInput, spaced, with_tooltip,
+    Spinner, TextInput, spaced, with_tooltip,
 };
 use crate::views::shell::Shell;
 use crate::views::widgets::field_label;
 
 const COPIED_FOR: Duration = Duration::from_millis(1200);
+const BODY_HEIGHT: f32 = 600.0;
+const BODY_MARGIN: f32 = 110.0;
+const VIOLATION_LABEL: f32 = 124.0;
 
 fn glow() -> Arc<RenderImage> {
     static GLOW: OnceLock<Arc<RenderImage>> = OnceLock::new();
@@ -193,6 +196,7 @@ impl AccountView {
             .map(|info| info.ranks())
             .unwrap_or_default();
         let profiles = store.profiles.profiles.clone();
+        let cabinet = store.cabinet_view(&account.uuid);
         let has_skin = matches!(store.skin_texture(&account.uuid), Some(Texture::Ready(_)));
         let has_cape = self.cape.is_some();
         let frame = self.stage.frame.clone();
@@ -420,6 +424,7 @@ impl AccountView {
                 .flex_wrap()
                 .gap(px(6.0))
                 .mt(px(12.0))
+                .mb(px(14.0))
                 .children(ranks.into_iter().map(|rank| {
                     let tone = parse_hex(&rank.color).unwrap_or(p.muted);
                     div()
@@ -539,19 +544,12 @@ impl AccountView {
                 }))
                 .when(pair.len() == 1, |row| row.child(div().flex_1()))
         });
-        let stats = div().mt(px(16.0)).max_h(px(210.0)).flex().flex_col().child(
-            ScrollArea::new("modal-stats", &self.stats_scroll)
-                .fixed()
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(8.0))
-                        .pr(px(12.0))
-                        .py(px(2.0))
-                        .children(rows),
-                ),
-        );
+        let stats = div()
+            .mt(px(16.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .children(rows);
 
         let mut options = vec![(String::new(), "- не выбран -".to_owned())];
         options.extend(profiles.iter().map(|name| (name.clone(), name.clone())));
@@ -734,19 +732,30 @@ impl AccountView {
                 ),
             );
 
+        let body_height = BODY_HEIGHT.min(f32::from(window.viewport_size().height) - BODY_MARGIN);
+        let details = ScrollArea::new("modal-details", &self.stats_scroll).child(
+            div()
+                .flex()
+                .flex_col()
+                .pr(px(14.0))
+                .pb(px(4.0))
+                .child(label)
+                .child(uuid_row)
+                .child(cabinet_block(&account.uuid, &cabinet, &p, window, cx))
+                .child(stats)
+                .child(profile_row)
+                .child(ram_row)
+                .child(note),
+        );
         let info = div()
             .flex_1()
             .min_w_0()
+            .h(px(body_height))
             .flex()
             .flex_col()
             .child(name_row)
             .children(groups)
-            .child(label)
-            .child(uuid_row)
-            .child(stats)
-            .child(profile_row)
-            .child(ram_row)
-            .child(note)
+            .child(details)
             .child(actions);
 
         let compact = f32::from(window.viewport_size().width) <= crate::theme::COMPACT_WIDTH;
@@ -1125,4 +1134,235 @@ fn next_frame(window: &Window) -> oneshot::Receiver<()> {
         vsync.send(()).ok();
     });
     frame_shown
+}
+
+fn violation_card(
+    kind: ac_api::PunishmentKind,
+    violation: &ac_api::Violation,
+    p: &Palette,
+) -> gpui::Div {
+    let (color, glyph) = match kind {
+        ac_api::PunishmentKind::Ban => (p.red, Icon::Gavel),
+        ac_api::PunishmentKind::Mute => (rgb(0xe08636), Icon::Muted),
+    };
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(5.0))
+        .px(px(11.0))
+        .py(px(9.0))
+        .rounded(px(9.0))
+        .border_1()
+        .border_color(Hsla { a: 0.3, ..color })
+        .bg(Hsla { a: 0.1, ..color })
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(7.0))
+                .child(icon(glyph, px(16.0), color))
+                .child(
+                    div()
+                        .text_size(rem(0.82))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(color)
+                        .child(crate::views::card::punish_title(kind)),
+                ),
+        )
+        .children(
+            crate::views::card::punish_lines(kind, violation)
+                .into_iter()
+                .map(|(label, value)| {
+                    div()
+                        .flex()
+                        .items_start()
+                        .gap(px(10.0))
+                        .text_size(rem(0.74))
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(VIOLATION_LABEL))
+                                .text_color(p.faint)
+                                .child(label),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(p.text)
+                                .child(if label == crate::views::card::ISSUER {
+                                    issuer_text(violation, value, p)
+                                } else {
+                                    value.into_any_element()
+                                }),
+                        )
+                }),
+        )
+}
+
+fn issuer_text(violation: &ac_api::Violation, fallback: String, p: &Palette) -> AnyElement {
+    if violation.issued_by_display.is_empty() {
+        return fallback.into_any_element();
+    }
+    let mut text = String::new();
+    let mut highlights = Vec::with_capacity(violation.issued_by_display.len());
+    for segment in &violation.issued_by_display {
+        let start = text.len();
+        text.push_str(&segment.text);
+        let color = parse_hex(&segment.color)
+            .filter(|_| !segment.color.eq_ignore_ascii_case("#ffffff"))
+            .unwrap_or(p.text);
+        highlights.push((
+            start..text.len(),
+            gpui::HighlightStyle {
+                color: Some(color),
+                ..Default::default()
+            },
+        ));
+    }
+    gpui::StyledText::new(text)
+        .with_highlights(highlights)
+        .into_any_element()
+}
+
+fn cabinet_block(
+    uuid: &str,
+    cabinet: &crate::state::CabinetView,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) -> gpui::Div {
+    let refresh_key = Key::of("cabinet-refresh");
+    let refresh_hover = motion::value(refresh_key, cx);
+    let refresh_uuid = uuid.to_owned();
+    let glyph = icon(Icon::Refresh, px(14.0), p.white);
+    let spin = cabinet.spin_angle(Instant::now());
+    if spin.is_some() {
+        window.request_animation_frame();
+    }
+    let glyph = match spin {
+        Some(turn) => glyph
+            .with_transformation(gpui::Transformation::rotate(gpui::Radians(
+                -std::f32::consts::TAU * turn,
+            )))
+            .into_any_element(),
+        None => glyph.into_any_element(),
+    };
+    let refresh = with_tooltip(
+        div()
+            .id("cabinet-refresh")
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .size(px(26.0))
+            .rounded(px(7.0))
+            .bg(mix(p.blue, p.blue_hover, refresh_hover))
+            .cursor_pointer()
+            .on_hover(move |hovered, window, cx| motion::hover(refresh_key, *hovered, window, cx))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                sound::play(Sound::Tap);
+                let uuid = refresh_uuid.clone();
+                this.store
+                    .update(cx, |store, cx| store.refresh_cabinet(uuid, true, cx));
+            }))
+            .child(glyph),
+        refresh_key,
+        "Обновить статус".into(),
+    );
+    let header = div()
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .child(
+            div()
+                .flex_1()
+                .text_size(rem(0.58))
+                .font_weight(FontWeight::BOLD)
+                .text_color(p.faint)
+                .child(spaced("БАН И МУТ", 0.4)),
+        )
+        .when(cabinet.has_session, |header| header.child(refresh));
+    let note = |text: String| div().text_size(rem(0.74)).text_color(p.muted).child(text);
+    let body: AnyElement = match cabinet.status.as_ref().filter(|_| cabinet.has_session) {
+        Some(status) if status.clean() => div()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(icon(Icon::Check, px(15.0), p.green))
+            .child(
+                div()
+                    .text_size(rem(0.76))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(p.green)
+                    .child("Ни бана, ни мута"),
+            )
+            .into_any_element(),
+        Some(status) => div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .children(
+                status
+                    .ban
+                    .as_ref()
+                    .map(|ban| violation_card(ac_api::PunishmentKind::Ban, ban, p)),
+            )
+            .children(
+                status
+                    .mute
+                    .as_ref()
+                    .map(|mute| violation_card(ac_api::PunishmentKind::Mute, mute, p)),
+            )
+            .into_any_element(),
+        None if cabinet.loading => div()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(Spinner::new("cabinet-spin", 14.0))
+            .child(note("Проверяю статус…".to_owned()))
+            .into_any_element(),
+        None => {
+            let uuid = uuid.to_owned();
+            let relogin = cabinet.error.is_some();
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .child(note(cabinet.error.clone().unwrap_or_else(|| {
+                    "Войдите в кабинет, чтобы видеть бан и мут".to_owned()
+                })))
+                .child(
+                    Button::new(
+                        "cabinet-login",
+                        if relogin {
+                            "Войти заново"
+                        } else {
+                            "Войти"
+                        },
+                        ButtonStyle::Tinted,
+                    )
+                    .height(32.0)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        sound::play(Sound::Tap);
+                        this.open_cabinet_login(uuid.clone(), cx);
+                    })),
+                )
+                .into_any_element()
+        }
+    };
+    div()
+        .mt(px(8.0))
+        .flex()
+        .flex_col()
+        .gap(px(9.0))
+        .px(px(10.0))
+        .py(px(9.0))
+        .rounded(px(9.0))
+        .border_1()
+        .border_color(p.line)
+        .bg(p.surface_2)
+        .child(header)
+        .child(body)
 }

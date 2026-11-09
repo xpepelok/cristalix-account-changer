@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ac_api::{
     Account, ApiFuture, Backend, BackendEvent, Caps, Group, GroupLaunchProgress, ImportProgress,
@@ -15,6 +15,8 @@ use crate::skin::{Skins, Texture};
 
 pub const TOAST_LIFETIME: Duration = Duration::from_millis(2600);
 const PLAYER_REFRESH: Duration = Duration::from_secs(60);
+const CABINET_REFRESH: Duration = Duration::from_secs(60);
+pub const CABINET_SPIN: Duration = Duration::from_millis(800);
 const UPDATE_RECHECK: Duration = Duration::from_secs(30 * 60);
 const LAUNCH_DEBOUNCE: Duration = Duration::from_secs(5);
 
@@ -60,9 +62,43 @@ pub struct Store {
     pending_players: HashSet<String>,
     launching: HashSet<String>,
     pub skins: Skins,
+    pub cabinet: HashMap<String, CabinetView>,
     pub toast: Option<Toast>,
     toast_seq: u64,
     _tasks: Vec<Task<()>>,
+}
+
+#[derive(Default, Clone)]
+pub struct CabinetView {
+    pub has_session: bool,
+    pub loading: bool,
+    pub manual: bool,
+    pub spin_started: Option<Instant>,
+    pub spin_until: Option<Instant>,
+    pub status: Option<ac_api::CabinetStatus>,
+    pub error: Option<String>,
+}
+
+impl CabinetView {
+    pub fn spin_angle(&self, now: Instant) -> Option<f32> {
+        let started = self.spin_started?;
+        if !self.loading && self.spin_until.is_none_or(|until| now >= until) {
+            return None;
+        }
+        let period = CABINET_SPIN.as_secs_f32();
+        Some(now.duration_since(started).as_secs_f32() % period / period)
+    }
+
+    fn settle_spin(&mut self, now: Instant) {
+        let Some(started) = self.spin_started else {
+            return;
+        };
+        let period = CABINET_SPIN.as_secs_f32();
+        let turns = (now.duration_since(started).as_secs_f32() / period)
+            .ceil()
+            .max(1.0);
+        self.spin_until = Some(started + CABINET_SPIN.mul_f32(turns));
+    }
 }
 
 impl EventEmitter<StoreEvent> for Store {}
@@ -95,12 +131,14 @@ impl Store {
             pending_players: HashSet::new(),
             launching: HashSet::new(),
             skins: Skins::default(),
+            cabinet: HashMap::new(),
             toast: None,
             toast_seq: 0,
             _tasks: Vec::new(),
         };
         store._tasks.push(store.listen(cx));
         store._tasks.push(store.refresh_players_periodically(cx));
+        store._tasks.push(store.refresh_cabinet_periodically(cx));
         store._tasks.push(store.recheck_updates(cx));
         store.load_all(cx);
         store
@@ -111,6 +149,28 @@ impl Store {
         cx.spawn(async move |this, cx| {
             while let Some(event) = events.next().await {
                 if this.update(cx, |store, cx| store.apply(event, cx)).is_err() {
+                    break;
+                }
+            }
+        })
+    }
+
+    fn refresh_cabinet_periodically(&self, cx: &mut Context<Self>) -> Task<()> {
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(CABINET_REFRESH).await;
+                let refreshed = this.update(cx, |store, cx| {
+                    let sessions: Vec<String> = store
+                        .cabinet
+                        .iter()
+                        .filter(|(_, view)| view.has_session)
+                        .map(|(uuid, _)| uuid.clone())
+                        .collect();
+                    for uuid in sessions {
+                        store.refresh_cabinet(uuid, false, cx);
+                    }
+                });
+                if refreshed.is_err() {
                     break;
                 }
             }
@@ -172,6 +232,7 @@ impl Store {
             store.online = Some(stats);
             cx.notify();
         });
+        self.load_cabinet_sessions(cx);
         self.check_update(cx);
     }
 
@@ -215,6 +276,108 @@ impl Store {
             store.profiles = profiles;
             cx.notify();
         });
+    }
+
+    pub fn cabinet_view(&self, uuid: &str) -> CabinetView {
+        self.cabinet.get(uuid).cloned().unwrap_or_default()
+    }
+
+    fn load_cabinet_sessions(&mut self, cx: &mut Context<Self>) {
+        self.fetch(cx, self.backend.cabinet_sessions(), |store, uuids, cx| {
+            for uuid in uuids {
+                store.cabinet.entry(uuid.clone()).or_default().has_session = true;
+                store.refresh_cabinet(uuid, false, cx);
+            }
+            cx.notify();
+        });
+    }
+
+    pub fn refresh_cabinet(&mut self, uuid: String, manual: bool, cx: &mut Context<Self>) {
+        {
+            let now = Instant::now();
+            let view = self.cabinet.entry(uuid.clone()).or_default();
+            if view.loading {
+                view.manual |= manual;
+                return;
+            }
+            let spinning = view.spin_until.is_some_and(|until| now < until);
+            if manual && spinning {
+                return;
+            }
+            view.manual = manual;
+            view.loading = true;
+            if !spinning {
+                view.spin_started = Some(now);
+            }
+            view.spin_until = None;
+        }
+        cx.notify();
+        let future = self.backend.cabinet_status(uuid.clone());
+        cx.spawn(async move |this, cx| {
+            let result = future.await;
+            this.update(cx, |store, cx| {
+                let name = store
+                    .account(&uuid)
+                    .map(|account| account.name.clone())
+                    .unwrap_or_default();
+                let view = store.cabinet.entry(uuid.clone()).or_default();
+                view.loading = false;
+                view.settle_spin(Instant::now());
+                let manual = std::mem::take(&mut view.manual);
+                let mut notice = None;
+                match result {
+                    Ok(status) => {
+                        let changes = view
+                            .status
+                            .as_ref()
+                            .map(|previous| cabinet_changes(previous, &status))
+                            .unwrap_or_default();
+                        if !changes.is_empty() {
+                            notice = Some((format!("{name}: {}", changes.join(", ")), false));
+                        } else if manual {
+                            notice = Some((format!("{name}: изменений нет"), false));
+                        }
+                        view.has_session = true;
+                        view.status = Some(status);
+                        view.error = None;
+                    }
+                    Err(error) => {
+                        if error.message() == ac_api::msg::CABINET_SESSION {
+                            view.has_session = false;
+                            view.status = None;
+                            view.error = Some(error.message().to_owned());
+                        } else if view.status.is_none() {
+                            view.error = Some(error.message().to_owned());
+                        }
+                        if manual {
+                            notice = Some((
+                                format!("Не удалось обновить {name}: {}", error.message()),
+                                true,
+                            ));
+                        }
+                    }
+                }
+                if let Some((text, error)) = notice {
+                    store.toast(text, error, cx);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub fn save_cabinet_session(&mut self, uuid: String, session: String, cx: &mut Context<Self>) {
+        let future = self.backend.set_cabinet_session(uuid.clone(), session);
+        cx.spawn(async move |this, cx| {
+            future.await.ok();
+            this.update(cx, |store, cx| {
+                store.cabinet.entry(uuid.clone()).or_default().has_session = true;
+                store.refresh_cabinet(uuid, false, cx);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn set_accounts(&mut self, accounts: Vec<Account>, cx: &mut Context<Self>) {
@@ -546,6 +709,41 @@ impl Store {
         let future = self.backend.set_pinned(uuid.to_owned(), !account.pinned);
         self.act(cx, future, "");
     }
+}
+
+fn cabinet_changes(
+    previous: &ac_api::CabinetStatus,
+    current: &ac_api::CabinetStatus,
+) -> Vec<&'static str> {
+    let mut changes = Vec::new();
+    let mut compare = |before: &Option<ac_api::Violation>,
+                       after: &Option<ac_api::Violation>,
+                       labels: [&'static str; 3]| {
+        match (before, after) {
+            (None, Some(_)) => changes.push(labels[0]),
+            (Some(_), None) => changes.push(labels[1]),
+            (Some(before), Some(after))
+                if before.expires_at != after.expires_at
+                    || before.permanent != after.permanent
+                    || before.reason != after.reason
+                    || before.price != after.price =>
+            {
+                changes.push(labels[2])
+            }
+            _ => {}
+        }
+    };
+    compare(
+        &previous.ban,
+        &current.ban,
+        ["получен бан", "бан снят", "бан изменился"],
+    );
+    compare(
+        &previous.mute,
+        &current.mute,
+        ["получен мут", "мут снят", "мут изменился"],
+    );
+    changes
 }
 
 pub fn online_status(

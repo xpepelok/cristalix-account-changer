@@ -33,8 +33,7 @@ use crate::views::stats::StatsView;
 use futures::StreamExt;
 
 const VIDEO_NOTICE: Duration = Duration::from_millis(600);
-const WAVE_GROW: Duration = Duration::from_millis(480);
-const WAVE_FADE: Duration = Duration::from_millis(260);
+const WAVE: Duration = Duration::from_millis(550);
 const DISMISS_GRACE: Duration = Duration::from_millis(250);
 const DROP_OUT: Duration = Duration::from_millis(120);
 const MODAL_OUT: Duration = Duration::from_millis(180);
@@ -108,8 +107,43 @@ pub enum Overlay {
 struct ThemeWave {
     origin: Point<Pixels>,
     started: Instant,
-    to: Theme,
-    applied: bool,
+    snapshot: crate::platform::window::Snapshot,
+    original: Vec<u8>,
+    shown: Option<Arc<RenderImage>>,
+}
+
+fn punch(wave: &mut ThemeWave, center: (f32, f32), radius: f32) {
+    let width = wave.snapshot.width as usize;
+    let height = wave.snapshot.height as usize;
+    let (cx, cy) = center;
+    let top = (cy - radius - 1.0).floor().max(0.0) as usize;
+    let bottom = ((cy + radius + 1.0).ceil().max(0.0) as usize).min(height);
+    let outer = radius + 1.0;
+    for y in top..bottom {
+        let dy = y as f32 + 0.5 - cy;
+        let span = outer * outer - dy * dy;
+        if span <= 0.0 {
+            continue;
+        }
+        let half = span.sqrt();
+        let left = (cx - half).floor().max(0.0) as usize;
+        let right = ((cx + half).ceil().max(0.0) as usize).min(width);
+        for x in left..right {
+            let dx = x as f32 + 0.5 - cx;
+            let keep = ((dx * dx + dy * dy).sqrt() - radius + 0.5).clamp(0.0, 1.0);
+            let index = (y * width + x) * 4;
+            let pixel = &mut wave.snapshot.pixels[index..index + 4];
+            if keep <= 0.0 {
+                pixel.copy_from_slice(&[0, 0, 0, 0]);
+            } else if keep < 1.0 {
+                let source = &wave.original[index..index + 4];
+                for channel in 0..3 {
+                    pixel[channel] = (f32::from(source[channel]) * keep).round() as u8;
+                }
+                pixel[3] = (255.0 * keep).round() as u8;
+            }
+        }
+    }
 }
 
 pub struct Shell {
@@ -129,6 +163,7 @@ pub struct Shell {
     ambient_task: Option<Task<()>>,
     backdrop_task: Option<Task<()>>,
     theme_wave: Option<ThemeWave>,
+    pub(crate) cabinet_login: Option<crate::views::cabinet::CabinetLogin>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -179,6 +214,7 @@ impl Shell {
             ambient_task: None,
             backdrop_task: None,
             theme_wave: None,
+            cabinet_login: None,
             _subscriptions: subscriptions,
         }
     }
@@ -340,6 +376,7 @@ impl Shell {
 
     pub(crate) fn close_to_background(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         Tooltips::dismiss(cx);
+        self.close_cabinet_login(cx);
         crate::platform::window::hide(window);
         ambient::set_live(false, cx);
         self.backdrop.set_live(false);
@@ -476,6 +513,9 @@ impl Shell {
     }
 
     fn escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.close_cabinet_login(cx) {
+            return;
+        }
         if self.popup.is_some() {
             self.set_popup(None);
             cx.notify();
@@ -494,10 +534,12 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(wave) = self.theme_wave.take()
-            && !wave.applied
+        if self
+            .theme_wave
+            .as_ref()
+            .is_some_and(|wave| wave.started.elapsed() < WAVE)
         {
-            crate::theme::install(wave.to, cx);
+            return;
         }
         let theme = self.store.read(cx).settings.theme.toggled();
         sound::play(if theme == Theme::Light {
@@ -505,55 +547,54 @@ impl Shell {
         } else {
             Sound::ThemeDark
         });
+        if let Some(previous) = self.theme_wave.take().and_then(|wave| wave.shown) {
+            window.drop_image(previous).ok();
+        }
+        self.theme_wave = crate::platform::window::snapshot(window).map(|snapshot| ThemeWave {
+            origin,
+            started: Instant::now(),
+            original: snapshot.pixels.clone(),
+            snapshot,
+            shown: None,
+        });
+        crate::theme::install(theme, cx);
         self.store.update(cx, |store, cx| {
             store.settings.theme = theme;
             let future = store.backend.set_theme(theme);
             store.act(cx, future, "");
         });
-        self.theme_wave = Some(ThemeWave {
-            origin,
-            started: Instant::now(),
-            to: theme,
-            applied: false,
-        });
-        window.refresh();
+        cx.refresh_windows();
     }
 
-    fn render_theme_wave(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    fn render_theme_wave(&mut self, window: &mut Window) -> Option<AnyElement> {
         let wave = self.theme_wave.as_mut()?;
         let elapsed = wave.started.elapsed();
-        if !wave.applied && elapsed >= WAVE_GROW {
-            wave.applied = true;
-            crate::theme::install(wave.to, cx);
-            cx.refresh_windows();
-        }
-        if elapsed >= WAVE_GROW + WAVE_FADE {
-            self.theme_wave = None;
+        if elapsed >= WAVE {
+            if let Some(shown) = self.theme_wave.take().and_then(|wave| wave.shown) {
+                window.drop_image(shown).ok();
+            }
             return None;
         }
         window.request_animation_frame();
+        let scale = window.scale_factor();
         let viewport = window.viewport_size();
         let (x, y) = (f32::from(wave.origin.x), f32::from(wave.origin.y));
         let (width, height) = (f32::from(viewport.width), f32::from(viewport.height));
-        let reach = x.max(width - x).hypot(y.max(height - y)) + 2.0;
-        let grow = motion::cubic_bezier(
-            motion::EASE_IN_OUT,
-            (elapsed.as_secs_f32() / WAVE_GROW.as_secs_f32()).min(1.0),
-        );
-        let fade = if wave.applied {
-            1.0 - motion::cubic_bezier(
-                motion::EASE_OUT,
-                ((elapsed - WAVE_GROW).as_secs_f32() / WAVE_FADE.as_secs_f32()).min(1.0),
-            )
-        } else {
-            1.0
-        };
-        let radius = reach * grow;
-        let color = crate::theme::Palette::for_theme(wave.to).graphite;
+        let reach = x.max(width - x).hypot(y.max(height - y));
+        let progress =
+            motion::cubic_bezier(motion::STANDARD, elapsed.as_secs_f32() / WAVE.as_secs_f32());
+        punch(wave, (x * scale, y * scale), reach * progress * scale);
+        let frame = image::RgbaImage::from_raw(
+            wave.snapshot.width,
+            wave.snapshot.height,
+            wave.snapshot.pixels.clone(),
+        )?;
+        let image = Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(
+            frame
+        )]));
+        if let Some(previous) = wave.shown.replace(image.clone()) {
+            window.drop_image(previous).ok();
+        }
         Some(
             deferred(
                 div()
@@ -561,17 +602,7 @@ impl Shell {
                     .top_0()
                     .left_0()
                     .size_full()
-                    .overflow_hidden()
-                    .child(
-                        div()
-                            .absolute()
-                            .left(px(x - radius))
-                            .top(px(y - radius))
-                            .size(px(radius * 2.0))
-                            .rounded_full()
-                            .bg(color)
-                            .opacity(fade),
-                    ),
+                    .child(img(image).size_full().object_fit(gpui::ObjectFit::Fill)),
             )
             .with_priority(20)
             .into_any_element(),
@@ -1067,7 +1098,9 @@ impl Render for Shell {
         let overlays = self.render_overlays(window, cx);
         let toast = self.render_toast(window, cx);
         let tooltip = tooltip_overlay(window, cx).map(|tip| deferred(tip).with_priority(10));
-        let wave = self.render_theme_wave(window, cx);
+        let wave = self.render_theme_wave(window);
+        self.drive_cabinet_login(window, cx);
+        let cabinet_login = self.render_cabinet_login(cx);
 
         div()
             .id("shell")
@@ -1107,6 +1140,7 @@ impl Render for Shell {
             .child(fabs)
             .children(card_menu)
             .children(overlays)
+            .children(cabinet_login)
             .children(toast)
             .children(tooltip)
             .children(wave)

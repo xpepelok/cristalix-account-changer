@@ -1,4 +1,4 @@
-use ac_api::{Account, TokenState};
+use ac_api::{Account, PunishmentKind, TokenState, Violation};
 use gpui::{
     Context, ElementId, FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton,
     ParentElement, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
@@ -28,6 +28,7 @@ impl Shell {
         let rank = store.display_rank(account);
         let status = store.online_status(account);
         let uuid = account.uuid.clone();
+        let cabinet = store.cabinet_view(&uuid);
         let key = Key::new("card", &uuid);
         let hover = motion::value(key, cx);
         let token = if self.home.debug_expired && account.launchable {
@@ -58,11 +59,24 @@ impl Shell {
         } else {
             rem(0.82)
         };
-        let time = relative_time(account.last_launched, now_secs());
+        let time = relative_time(account.last_launched, now_secs())
+            .filter(|_| !status.as_ref().is_some_and(|status| status.on));
         let mut meta_budget = body;
         if token == TokenState::Missing {
             meta_budget -= fit::text_width("НЕТ ТОКЕНА", 9.6, FontWeight::BOLD, 0.4, window) + 21.0;
         }
+        let punishments: Vec<(PunishmentKind, Violation)> = cabinet
+            .status
+            .iter()
+            .flat_map(|status| {
+                [
+                    status.ban.clone().map(|ban| (PunishmentKind::Ban, ban)),
+                    status.mute.clone().map(|mute| (PunishmentKind::Mute, mute)),
+                ]
+            })
+            .flatten()
+            .collect();
+        meta_budget -= punishments.len() as f32 * (CHIP_ICON_ONLY + CHIP_GAP);
         let time_width = time.as_ref().map_or(0.0, |time| {
             fit::text_width(time, 11.2, FontWeight::NORMAL, 0.0, window) + 7.0
         });
@@ -279,6 +293,11 @@ impl Shell {
             .when(token == TokenState::Missing, |meta| {
                 meta.child(Badge::missing())
             })
+            .children(
+                punishments
+                    .iter()
+                    .map(|(kind, violation)| punishment_chip(&uuid, *kind, violation, &p)),
+            )
             .when_some(status, |meta, status| {
                 meta.child(Badge::status(status.text, status.on).size(status_size))
             })
@@ -417,4 +436,104 @@ impl Shell {
                     .child(play),
             )
     }
+}
+
+const CHIP_ICON_ONLY: f32 = 26.5;
+const CHIP_GAP: f32 = 7.0;
+
+pub(crate) const ISSUER: &str = "Выдал";
+
+pub(crate) fn punish_title(kind: PunishmentKind) -> &'static str {
+    match kind {
+        PunishmentKind::Ban => "Бан",
+        PunishmentKind::Mute => "Мут",
+    }
+}
+
+pub(crate) fn punish_lines(
+    kind: PunishmentKind,
+    violation: &Violation,
+) -> Vec<(&'static str, String)> {
+    let mut lines = vec![(
+        "Срок",
+        if violation.permanent {
+            "навсегда".to_owned()
+        } else if violation.expires_at > 0 {
+            format!(
+                "до {}",
+                crate::format::date_time(violation.expires_at / 1000)
+            )
+        } else {
+            "неизвестно".to_owned()
+        },
+    )];
+    if !violation.permanent && violation.expires_at > 0 {
+        let left = violation.expires_at - crate::format::now_millis();
+        if left > 0 {
+            lines.push(("Осталось", crate::format::span(left)));
+        }
+    }
+    if !violation.reason.is_empty() {
+        lines.push(("Правило", violation.reason.clone()));
+    }
+    if !violation.issued_by_display.is_empty() {
+        lines.push((
+            ISSUER,
+            violation
+                .issued_by_display
+                .iter()
+                .map(|segment| segment.text.as_str())
+                .collect(),
+        ));
+    } else if !violation.issued_by_name.is_empty() {
+        lines.push((ISSUER, violation.issued_by_name.clone()));
+    }
+    if violation.price > 0 {
+        lines.push((
+            match kind {
+                PunishmentKind::Ban => "Стоимость разбана",
+                PunishmentKind::Mute => "Стоимость размута",
+            },
+            violation.price.to_string(),
+        ));
+    }
+    lines
+}
+
+fn punish_tooltip(kind: PunishmentKind, violation: &Violation) -> String {
+    let mut text = punish_title(kind).to_owned();
+    for (label, value) in punish_lines(kind, violation) {
+        text.push('\n');
+        text.push_str(label);
+        text.push_str(": ");
+        text.push_str(&value);
+    }
+    text
+}
+
+fn punishment_chip(
+    uuid: &str,
+    kind: PunishmentKind,
+    violation: &Violation,
+    p: &crate::theme::Palette,
+) -> gpui::Stateful<gpui::Div> {
+    let (color, glyph, name) = match kind {
+        PunishmentKind::Ban => (p.red, Icon::Gavel, "card-ban"),
+        PunishmentKind::Mute => (crate::theme::rgb(0xe08636), Icon::Muted, "card-mute"),
+    };
+    let chip = div()
+        .id(ElementId::Name(format!("{name}-{uuid}").into()))
+        .flex()
+        .flex_none()
+        .items_center()
+        .px(px(7.0))
+        .py(px(2.0))
+        .rounded_full()
+        .bg(gpui::Hsla { a: 0.15, ..color })
+        .child(icon(glyph, px(12.5), color));
+    with_tooltip(
+        chip,
+        Key::new(name, uuid),
+        punish_tooltip(kind, violation).into(),
+    )
 }
