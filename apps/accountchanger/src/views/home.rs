@@ -1077,11 +1077,6 @@ impl Shell {
             heart,
             motion::EASE_IN_OUT,
         );
-        let glow = motion::keyframes(
-            &[(0.0, 0.0), (0.5, 1.0), (1.0, 0.0)],
-            ambient::cycle(Duration::from_millis(3400), cx).unwrap_or(0.0),
-            motion::EASE_IN_OUT,
-        );
         div()
             .flex_none()
             .flex()
@@ -1095,14 +1090,6 @@ impl Shell {
             .child(
                 div()
                     .id("footer-name")
-                    .rounded_full()
-                    .shadow(shadow(
-                        0.0,
-                        0.0,
-                        3.0 + 4.0 * glow,
-                        0.0,
-                        mix(rgba(0x7aa8ff, 0.3), rgba(0xa78bfa, 0.5), glow),
-                    ))
                     .cursor_pointer()
                     .on_hover(move |hovered, window, cx| motion::hover(key, *hovered, window, cx))
                     .on_click(|_, _, _| {
