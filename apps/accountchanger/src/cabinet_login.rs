@@ -7,12 +7,20 @@ pub struct Prefill {
     pub password: String,
 }
 
+#[cfg_attr(not(windows), expect(dead_code))]
+pub struct Signed {
+    pub session: String,
+    pub login: String,
+    pub password: String,
+}
+
 pub use imp::LoginView;
 
 #[cfg(windows)]
 mod imp {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::num::NonZeroIsize;
+    use std::rc::Rc;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
@@ -33,7 +41,7 @@ mod imp {
     use wry::dpi::{PhysicalPosition, PhysicalSize};
     use wry::{Rect, WebContext, WebViewBuilder};
 
-    use super::Prefill;
+    use super::{Prefill, Signed};
 
     const LOGIN_URL: &str = "https://cristalix.gg/cabinet/login";
     const ORIGIN: &str = "https://cristalix.gg";
@@ -58,7 +66,7 @@ mod imp {
 
     pub struct LoginView {
         commands: Sender<Command>,
-        results: Receiver<Result<String, String>>,
+        results: Receiver<Result<Signed, String>>,
         placed: Cell<Option<Bounds<Pixels>>>,
     }
 
@@ -103,8 +111,12 @@ mod imp {
             })
             .unwrap_or_default();
         format!(
-            "(function(){{var css={css};function apply(){{var s=document.createElement('style');\
-             s.textContent=css;(document.head||document.documentElement).appendChild(s);{fill}}}\
+            "(function(){{var css={css};function report(){{var u=document.getElementById('username-input');\
+             var p=document.getElementById('password-input');\
+             if(u&&p&&window.ipc)window.ipc.postMessage(u.value+'\\n'+p.value);}}\
+             function apply(){{var s=document.createElement('style');\
+             s.textContent=css;(document.head||document.documentElement).appendChild(s);{fill}report();}}\
+             ['input','change','submit','click','keydown'].forEach(function(e){{document.addEventListener(e,report,true);}});\
              if(document.readyState!=='loading')apply();else document.addEventListener('DOMContentLoaded',apply);}})();",
             css = json_string(&css),
         )
@@ -182,7 +194,7 @@ mod imp {
         prefill: Option<Prefill>,
         background: (u8, u8, u8),
         commands: Receiver<Command>,
-        results: Sender<Result<String, String>>,
+        results: Sender<Result<Signed, String>>,
     ) {
         let owner = HWND(owner.get() as *mut core::ffi::c_void);
         let Some(host) = popup(owner, start) else {
@@ -196,6 +208,8 @@ mod imp {
         };
         let logged_in = Arc::new(AtomicBool::new(false));
         let signal = logged_in.clone();
+        let typed: Rc<RefCell<(String, String)>> = Rc::default();
+        let sink = typed.clone();
         let mut context = WebContext::new(Some(super::profile_dir()));
         let css_background = format!(
             "#{:02x}{:02x}{:02x}",
@@ -207,6 +221,14 @@ mod imp {
             .with_background_color((background.0, background.1, background.2, 255))
             .with_bounds(fill(start))
             .with_initialization_script(init_script(prefill.as_ref(), &css_background))
+            .with_ipc_handler(move |request| {
+                if !request.uri().to_string().starts_with(ORIGIN) {
+                    return;
+                }
+                if let Some((login, password)) = request.body().split_once('\n') {
+                    *sink.borrow_mut() = (login.trim().to_owned(), password.to_owned());
+                }
+            })
             .with_navigation_handler(move |url: String| {
                 let done = url.starts_with(CABINET) && !url.contains("/cabinet/login");
                 if done {
@@ -268,7 +290,14 @@ mod imp {
                 });
                 results
                     .send(match session {
-                        Some(session) if !session.is_empty() => Ok(session),
+                        Some(session) if !session.is_empty() => {
+                            let (login, password) = typed.take();
+                            Ok(Signed {
+                                session,
+                                login,
+                                password,
+                            })
+                        }
                         _ => Err("не удалось получить сессию".to_owned()),
                     })
                     .ok();
@@ -312,7 +341,7 @@ mod imp {
             self.commands.send(Command::Place(area(bounds, scale))).ok();
         }
 
-        pub fn session(&self) -> Option<Result<String, String>> {
+        pub fn session(&self) -> Option<Result<Signed, String>> {
             self.results.try_recv().ok()
         }
     }
@@ -328,7 +357,7 @@ mod imp {
 mod imp {
     use gpui::{Bounds, Pixels, Window};
 
-    use super::Prefill;
+    use super::{Prefill, Signed};
 
     pub struct LoginView;
 
@@ -344,7 +373,7 @@ mod imp {
 
         pub fn place(&self, _bounds: Bounds<Pixels>, _scale: f32) {}
 
-        pub fn session(&self) -> Option<Result<String, String>> {
+        pub fn session(&self) -> Option<Result<Signed, String>> {
             None
         }
     }

@@ -78,6 +78,7 @@ pub trait Backend: Send + Sync + 'static {
     fn set_cabinet_session(&self, uuid: String, session: String) -> ApiFuture<()>;
     fn clear_cabinet_session(&self, uuid: String) -> ApiFuture<()>;
     fn account_password(&self, uuid: String) -> ApiFuture<Option<String>>;
+    fn set_account_password(&self, uuid: String, password: String) -> ApiFuture<()>;
     fn cabinet_sessions(&self) -> ApiFuture<Vec<String>>;
 
     fn online_stats(&self) -> ApiFuture<OnlineStats>;

@@ -787,6 +787,16 @@ impl Backend for Core {
         self.with(move |inner| async move { Ok(inner.store.password(&uuid).await.unwrap_or(None)) })
     }
 
+    fn set_account_password(&self, uuid: String, password: String) -> ApiFuture<()> {
+        self.with(move |inner| async move {
+            inner
+                .store
+                .set_password(&uuid, &password)
+                .await
+                .map_err(|_| ApiError::fixed(msg::GENERIC))
+        })
+    }
+
     fn cabinet_sessions(&self) -> ApiFuture<Vec<String>> {
         self.with(
             |inner| async move { Ok(inner.store.cabinet_sessions().await.unwrap_or_default()) },

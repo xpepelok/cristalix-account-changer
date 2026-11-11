@@ -375,6 +375,19 @@ impl Store {
         .detach();
     }
 
+    pub fn save_account_password(
+        &mut self,
+        uuid: String,
+        password: String,
+        cx: &mut Context<Self>,
+    ) {
+        let future = self.backend.set_account_password(uuid, password);
+        cx.spawn(async move |_, _| {
+            future.await.ok();
+        })
+        .detach();
+    }
+
     pub fn save_cabinet_session(&mut self, uuid: String, session: String, cx: &mut Context<Self>) {
         let future = self.backend.set_cabinet_session(uuid.clone(), session);
         cx.spawn(async move |this, cx| {

@@ -137,8 +137,14 @@ impl Shell {
         let uuid = login.uuid.clone();
         self.cabinet_login = None;
         match result {
-            Ok(session) => self.store.update(cx, |store, cx| {
-                store.save_cabinet_session(uuid, session, cx);
+            Ok(signed) => self.store.update(cx, |store, cx| {
+                let own = store
+                    .account(&uuid)
+                    .is_some_and(|account| account.name.eq_ignore_ascii_case(&signed.login));
+                if own && !signed.password.is_empty() {
+                    store.save_account_password(uuid.clone(), signed.password, cx);
+                }
+                store.save_cabinet_session(uuid, signed.session, cx);
                 store.toast("Кабинет подключён", false, cx);
             }),
             Err(message) => self.toast(message, true, cx),

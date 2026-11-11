@@ -174,7 +174,7 @@ mod windows {
             &self,
             before: &std::collections::HashSet<String>,
             timeout: Duration,
-        ) -> Option<String> {
+        ) -> Option<(String, String)> {
             let deadline = Instant::now() + timeout;
             while Instant::now() < deadline {
                 if self.import.cancelled() {
@@ -185,7 +185,7 @@ mod windows {
                     if let Some(key) = valid_login(&account, now)
                         && !before.contains(&key)
                     {
-                        return Some(account.name);
+                        return Some((account.uuid, account.name));
                     }
                 }
                 tokio::time::sleep(TOKEN_POLL).await;
@@ -261,20 +261,24 @@ mod windows {
                 }
                 break;
             }
-            if let Some(name) = self
+            let (uuid, name) = match self
                 .wait_vault_token(&before, Duration::from_secs(10))
                 .await
             {
-                return Ok(name);
-            }
-            let pid = launcher.pid();
-            let games = Arc::clone(self.tracker.games());
-            tokio::spawn(async move {
-                ac_launcher::click_play_for_pid(&games, pid, PLAY_TIMEOUT).await;
-            });
-            self.wait_vault_token(&before, Duration::from_secs(35))
-                .await
-                .ok_or_else(|| msg::LOGIN_TIMEOUT.to_owned())
+                Some(found) => found,
+                None => {
+                    let pid = launcher.pid();
+                    let games = Arc::clone(self.tracker.games());
+                    tokio::spawn(async move {
+                        ac_launcher::click_play_for_pid(&games, pid, PLAY_TIMEOUT).await;
+                    });
+                    self.wait_vault_token(&before, Duration::from_secs(35))
+                        .await
+                        .ok_or_else(|| msg::LOGIN_TIMEOUT.to_owned())?
+                }
+            };
+            self.store.set_password(&uuid, password).await.ok();
+            Ok(name)
         }
 
         pub(crate) async fn run_import(self: &Arc<Self>, tasks: Vec<Task>) {

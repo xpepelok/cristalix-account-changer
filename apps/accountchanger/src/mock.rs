@@ -1023,6 +1023,10 @@ impl Backend for MockBackend {
         self.with(|_| Ok(None))
     }
 
+    fn set_account_password(&self, _uuid: String, _password: String) -> ApiFuture<()> {
+        self.with(|_| Ok(()))
+    }
+
     fn cabinet_sessions(&self) -> ApiFuture<Vec<String>> {
         self.with(|_| Ok(Vec::new()))
     }
