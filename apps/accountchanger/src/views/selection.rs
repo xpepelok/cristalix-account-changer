@@ -676,11 +676,16 @@ impl Shell {
             return None;
         }
         let p = cx.palette();
-        let accounts = self.picked_accounts(cx);
-        let count = accounts.len();
-        let all_pinned = accounts.iter().all(|account| account.pinned);
-        let group = self.active_group(self.store.read(cx)).cloned();
+        let store = self.store.read(cx);
         let selection = &self.home.selection;
+        let (count, all_pinned) = store
+            .accounts
+            .iter()
+            .filter(|account| selection.picked.contains(&account.uuid))
+            .fold((0, true), |(count, all), account| {
+                (count + 1, all && account.pinned)
+            });
+        let group = self.active_group(store).map(|group| group.id.clone());
         let everything = selection
             .order
             .iter()
@@ -771,8 +776,7 @@ impl Shell {
                 );
             }),
         );
-        let remove = group.as_ref().map(|group| {
-            let id = group.id.clone();
+        let remove = group.map(|id| {
             action(
                 "bulk-remove",
                 Icon::CloseCircle,

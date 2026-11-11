@@ -139,7 +139,6 @@ pub struct SkinRenderer {
     supersample: u32,
     color: Vec<u32>,
     depth: Vec<f32>,
-    output: Vec<u8>,
     cuboids: Vec<Cuboid>,
     order: Vec<(u8, f32, usize)>,
     dirty: Option<Bounds>,
@@ -157,13 +156,13 @@ impl SkinRenderer {
         height: u32,
         supersample: u32,
         format: PixelFormat,
-    ) -> &[u8] {
+    ) -> Vec<u8> {
         let supersample = supersample.max(1);
         self.resize(width, height, supersample);
         self.clear_dirty();
-        self.output.fill(0);
+        let mut output = vec![0; width as usize * height as usize * 4];
         if width == 0 || height == 0 {
-            return &self.output;
+            return output;
         }
 
         build(
@@ -256,13 +255,13 @@ impl SkinRenderer {
                 &self.color,
                 internal_width,
                 supersample as usize,
-                &mut self.output,
+                &mut output,
                 width as usize,
                 touched,
                 format,
             );
         }
-        &self.output
+        output
     }
 
     fn clear_dirty(&mut self) {
@@ -290,7 +289,6 @@ impl SkinRenderer {
         let samples = (width * supersample) as usize * (height * supersample) as usize;
         self.color.resize(samples, 0);
         self.depth.resize(samples, 0.0);
-        self.output.resize(width as usize * height as usize * 4, 0);
         self.dirty = None;
         (self.width, self.height, self.supersample) = (width, height, supersample);
     }
@@ -543,6 +541,34 @@ fn resolve(
     touched: Bounds,
     format: PixelFormat,
 ) {
+    match factor {
+        1 => resolve_by(color, stride, 1, output, width, touched, format),
+        2 => resolve_by(color, stride, 2, output, width, touched, format),
+        3 => resolve_by(color, stride, 3, output, width, touched, format),
+        4 => resolve_by(color, stride, 4, output, width, touched, format),
+        _ => resolve_by(color, stride, factor, output, width, touched, format),
+    }
+}
+
+#[inline(always)]
+fn straight_channel(channel: u32, alpha: u32, samples: u32) -> u8 {
+    if alpha == 255 * samples {
+        ((channel + samples / 2) / samples) as u8
+    } else {
+        ((channel * 255 + alpha / 2) / alpha).min(255) as u8
+    }
+}
+
+#[inline(always)]
+fn resolve_by(
+    color: &[u32],
+    stride: usize,
+    factor: usize,
+    output: &mut [u8],
+    width: usize,
+    touched: Bounds,
+    format: PixelFormat,
+) {
     let samples = (factor * factor) as u32;
     let (pixels, _) = output.as_chunks_mut::<4>();
     let height = pixels.len() / width;
@@ -563,7 +589,7 @@ fn resolve(
             if alpha == 0 {
                 continue;
             }
-            let straight = |channel: u32| ((channel * 255 + alpha / 2) / alpha).min(255) as u8;
+            let straight = |channel: u32| straight_channel(channel, alpha, samples);
             let rgba = [
                 straight(sum[0]),
                 straight(sum[1]),
@@ -598,6 +624,20 @@ mod tests {
     }
 
     #[test]
+    fn opaque_resolve_shortcut_matches_division() {
+        for factor in 1..=8u32 {
+            let samples = factor * factor;
+            let alpha = 255 * samples;
+            for channel in 0..=alpha {
+                assert_eq!(
+                    straight_channel(channel, alpha, samples),
+                    ((channel * 255 + alpha / 2) / alpha).min(255) as u8
+                );
+            }
+        }
+    }
+
+    #[test]
     fn supersample_matches_skinview_pixel_ratio() {
         assert_eq!(supersample_factor(1.0), 2);
         assert_eq!(supersample_factor(1.5), 2);
@@ -611,15 +651,13 @@ mod tests {
         let mut scene = Scene::new(&skin, None);
         scene.player_yaw = 0.0;
         let mut renderer = SkinRenderer::new();
-        let frame = renderer
-            .render(&scene, 200, 400, 2, PixelFormat::Rgba)
-            .to_vec();
+        let frame = renderer.render(&scene, 200, 400, 2, PixelFormat::Rgba);
         assert_eq!(frame.len(), 200 * 400 * 4);
         assert_eq!(pixel(&frame, 200, 0, 0), [0; 4]);
         assert_eq!(pixel(&frame, 200, 100, 90), [244, 0, 0, 255]);
         assert_eq!(pixel(&frame, 200, 100, 200), [191, 191, 191, 255]);
         let bgra = renderer.render(&scene, 200, 400, 2, PixelFormat::Bgra);
-        assert_eq!(pixel(bgra, 200, 100, 90), [0, 0, 244, 255]);
+        assert_eq!(pixel(&bgra, 200, 100, 90), [0, 0, 244, 255]);
     }
 
     #[test]

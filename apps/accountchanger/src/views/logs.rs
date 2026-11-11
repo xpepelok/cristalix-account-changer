@@ -1,10 +1,12 @@
+use std::sync::Arc;
 use std::time::Duration;
 
-use ac_api::{LogSession, LogSummary, LogView};
+use ac_api::{LogLine, LogSession, LogSummary, LogView};
 use gpui::{
     AnyElement, Context, ElementId, FontWeight, Hsla, InteractiveElement, IntoElement,
-    ListAlignment, ListState, MouseButton, ParentElement, ScrollHandle, StatefulInteractiveElement,
-    Styled, Task, Window, deferred, div, list, prelude::FluentBuilder, px, relative,
+    ListAlignment, ListState, MouseButton, ParentElement, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, Task, Window, deferred, div, list, prelude::FluentBuilder,
+    px, relative,
 };
 
 use crate::format::{
@@ -26,7 +28,9 @@ pub struct LogsView {
     loaded: bool,
     uuid: Option<String>,
     session: Option<String>,
-    view: LogView,
+    log: Arc<Vec<LogLine>>,
+    sessions: Vec<LogSession>,
+    labels: Vec<SharedString>,
     lines: ListState,
     side_scroll: ScrollHandle,
     sessions_scroll: ScrollHandle,
@@ -35,21 +39,24 @@ pub struct LogsView {
     selecting: bool,
 }
 
-fn session_labels(sessions: &[LogSession]) -> Vec<String> {
+fn session_labels(sessions: &[LogSession]) -> Vec<SharedString> {
+    let days: Vec<_> = sessions
+        .iter()
+        .map(|session| session_day(session.started))
+        .collect();
     sessions
         .iter()
-        .map(|session| {
+        .zip(&days)
+        .map(|(session, day)| {
             if session.active {
-                return "Текущая".to_owned();
+                return "Текущая".into();
             }
-            let day = session_day(session.started);
             let ordinal = sessions
                 .iter()
-                .filter(|other| {
-                    session_day(other.started) == day && other.started <= session.started
-                })
+                .zip(&days)
+                .filter(|(other, other_day)| *other_day == day && other.started <= session.started)
                 .count();
-            session_label(session.started, ordinal)
+            session_label(session.started, ordinal).into()
         })
         .collect()
 }
@@ -61,7 +68,9 @@ impl LogsView {
             loaded: false,
             uuid: None,
             session: None,
-            view: LogView::default(),
+            log: Arc::default(),
+            sessions: Vec::new(),
+            labels: Vec::new(),
             lines: ListState::new(0, ListAlignment::Bottom, px(400.0)),
             side_scroll: ScrollHandle::new(),
             sessions_scroll: ScrollHandle::new(),
@@ -73,7 +82,19 @@ impl LogsView {
 
     fn current(&self) -> Option<&LogSession> {
         let id = self.session.as_ref()?;
-        self.view.sessions.iter().find(|session| &session.id == id)
+        self.sessions.iter().find(|session| &session.id == id)
+    }
+
+    fn set_log(&mut self, log: LogView) {
+        self.labels = session_labels(&log.sessions);
+        self.sessions = log.sessions;
+        self.log = Arc::new(log.lines);
+    }
+
+    fn clear_log(&mut self) {
+        self.log = Arc::default();
+        self.sessions = Vec::new();
+        self.labels = Vec::new();
     }
 
     pub fn render(
@@ -313,12 +334,12 @@ impl LogsView {
         let view_bg = p.logs_bg;
         let empty_text = if self.uuid.is_none() {
             Some("Выбери аккаунт слева, чтобы увидеть его лог")
-        } else if self.view.lines.is_empty() {
+        } else if self.log.is_empty() {
             Some("Лог пуст")
         } else {
             None
         };
-        let lines = self.view.lines.clone();
+        let lines = self.log.clone();
         let text_color = p.logs_text;
         let selection = self.selection;
         let selection_bg = alpha(p.blue, 0.3);
@@ -401,14 +422,12 @@ impl LogsView {
                 ),
             });
 
-        let labels = session_labels(&self.view.sessions);
         let session_id = self.session.clone();
-        let sessions = (!self.view.sessions.is_empty()).then(|| {
+        let sessions = (!self.sessions.is_empty()).then(|| {
             let buttons = self
-                .view
                 .sessions
                 .iter()
-                .zip(labels)
+                .zip(&self.labels)
                 .map(|(session, label)| {
                     let active = session_id.as_deref() == Some(session.id.as_str());
                     let key = Key::new("log-session", &session.id);
@@ -464,7 +483,7 @@ impl LogsView {
                                 cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
                                     this.popup = Some(Popup::LogSession {
                                         session: menu_id.clone(),
-                                        label: menu_label.clone(),
+                                        label: menu_label.to_string(),
                                         x: f32::from(event.position.x),
                                         y: f32::from(event.position.y),
                                     });
@@ -472,7 +491,7 @@ impl LogsView {
                                 }),
                             )
                         })
-                        .child(label)
+                        .child(label.clone())
                 });
             div()
                 .id("logs-sessions")
@@ -549,22 +568,18 @@ impl Shell {
             return false;
         };
         if all {
-            view.selection = (!view.view.lines.is_empty()).then(|| (0, view.view.lines.len() - 1));
+            view.selection = (!view.log.is_empty()).then(|| (0, view.log.len() - 1));
             cx.notify();
             return true;
         }
         let Some((a, b)) = view.selection else {
             return false;
         };
-        let text = view.view.lines
-            [a.min(b)..=a.max(b).min(view.view.lines.len().saturating_sub(1))]
+        let text = view.log[a.min(b)..=a.max(b).min(view.log.len().saturating_sub(1))]
             .iter()
             .map(|line| line.text.as_str())
             .collect::<Vec<_>>()
-            .join(
-                "
-",
-            );
+            .join("\n");
         cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
         self.toast("Скопировано", false, cx);
         true
@@ -603,7 +618,7 @@ impl Shell {
                 if selected_gone {
                     view.uuid = None;
                     view.session = None;
-                    view.view = LogView::default();
+                    view.clear_log();
                 }
                 let pick = view.uuid.is_none().then_some(first).flatten();
                 cx.notify();
@@ -644,8 +659,8 @@ impl Shell {
                 else {
                     return;
                 };
-                let unchanged = view.view.lines.len() == log.lines.len()
-                    && view.view.lines.last() == log.lines.last();
+                let unchanged =
+                    view.log.len() == log.lines.len() && view.log.last() == log.lines.last();
                 if view
                     .session
                     .as_ref()
@@ -657,7 +672,7 @@ impl Shell {
                     view.selection = None;
                 }
                 if force || !unchanged {
-                    let old = view.view.lines.len();
+                    let old = view.log.len();
                     let new = log.lines.len();
                     if force || new < old {
                         view.lines.reset(new);
@@ -665,7 +680,7 @@ impl Shell {
                         view.lines.splice(old..old, new - old);
                     }
                 }
-                view.view = log;
+                view.set_log(log);
                 let active = view.current().is_some_and(|s| s.active);
                 if active && view.ticker.is_none() {
                     view.ticker = Some(cx.spawn(async move |this, cx| {
@@ -707,7 +722,7 @@ impl Shell {
                                 if let Some(view) = shell.overlay::<LogsView>() {
                                     view.uuid = None;
                                     view.session = None;
-                                    view.view = LogView::default();
+                                    view.clear_log();
                                     view.ticker = None;
                                 }
                                 shell.refresh_logs_side(cx);

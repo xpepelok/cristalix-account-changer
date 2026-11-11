@@ -1,4 +1,4 @@
-use sqlx::Row;
+use sqlx::{Row, SqliteExecutor};
 
 use crate::error::Result;
 use crate::model::PlayerCacheEntry;
@@ -21,15 +21,18 @@ impl Store {
     }
 
     pub async fn upsert_player(&self, name: &str, info_json: &str, fetched_at: i64) -> Result<()> {
-        sqlx::query(
-            "INSERT INTO player_cache (name, info, fetched_at) VALUES (?1, ?2, ?3) \
-             ON CONFLICT (name) DO UPDATE SET info = ?2, fetched_at = ?3",
-        )
-        .bind(name.to_lowercase())
-        .bind(info_json)
-        .bind(fetched_at)
-        .execute(&self.pool)
-        .await?;
+        upsert_player(&self.pool, name, info_json, fetched_at).await
+    }
+
+    pub async fn upsert_players(&self, entries: &[PlayerCacheEntry]) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        let mut tx = self.pool.begin().await?;
+        for entry in entries {
+            upsert_player(&mut *tx, &entry.name, &entry.info_json, entry.fetched_at).await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 
@@ -48,4 +51,22 @@ impl Store {
             .await?;
         Ok(())
     }
+}
+
+async fn upsert_player<'e>(
+    executor: impl SqliteExecutor<'e>,
+    name: &str,
+    info_json: &str,
+    fetched_at: i64,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO player_cache (name, info, fetched_at) VALUES (?1, ?2, ?3) \
+         ON CONFLICT (name) DO UPDATE SET info = ?2, fetched_at = ?3",
+    )
+    .bind(name.to_lowercase())
+    .bind(info_json)
+    .bind(fetched_at)
+    .execute(executor)
+    .await?;
+    Ok(())
 }

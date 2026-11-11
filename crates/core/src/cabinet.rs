@@ -81,13 +81,31 @@ pub(crate) async fn fetch_status(
     http: &reqwest::Client,
     session: &str,
 ) -> ApiResult<CabinetStatus> {
-    let mut ban = fetch_one(http, session, PunishmentKind::Ban).await?;
-    let mut mute = fetch_one(http, session, PunishmentKind::Mute).await?;
-    for violation in [ban.as_mut(), mute.as_mut()].into_iter().flatten() {
+    let (ban, mute) = tokio::join!(
+        fetch_one(http, session, PunishmentKind::Ban),
+        fetch_one(http, session, PunishmentKind::Mute),
+    );
+    let (mut ban, mut mute) = (ban?, mute?);
+    if let (Some(ban), Some(mute)) = (ban.as_mut(), mute.as_mut())
+        && ban.issued_by == mute.issued_by
+    {
+        assign_issuer(http, Some(ban)).await;
+        mute.issued_by_name.clone_from(&ban.issued_by_name);
+        mute.issued_by_display.clone_from(&ban.issued_by_display);
+    } else {
+        tokio::join!(
+            assign_issuer(http, ban.as_mut()),
+            assign_issuer(http, mute.as_mut()),
+        );
+    }
+    Ok(CabinetStatus { ban, mute })
+}
+
+async fn assign_issuer(http: &reqwest::Client, violation: Option<&mut Violation>) {
+    if let Some(violation) = violation {
         (violation.issued_by_name, violation.issued_by_display) =
             issuer(http, &violation.issued_by).await;
     }
-    Ok(CabinetStatus { ban, mute })
 }
 
 async fn fetch_one(

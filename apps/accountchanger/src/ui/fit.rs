@@ -1,4 +1,4 @@
-use gpui::{FontWeight, Pixels, SharedString, TextRun, Window, px};
+use gpui::{FontWeight, Pixels, TextRun, Window, px};
 
 use crate::theme::FONT_FAMILY;
 
@@ -17,13 +17,10 @@ pub fn text_width(text: &str, size: f32, weight: FontWeight, spacing: f32, windo
         underline: None,
         strikethrough: None,
     };
-    let shaped = window.text_system().shape_line(
-        SharedString::from(text.to_owned()),
-        px(size),
-        &[run],
-        None,
-    );
-    f32::from(shaped.width) + spacing * text.chars().count() as f32
+    let layout = window
+        .text_system()
+        .layout_line(text, px(size), &[run], None);
+    f32::from(layout.width) + spacing * text.chars().count() as f32
 }
 
 pub fn fit_size(

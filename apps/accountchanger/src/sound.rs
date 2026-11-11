@@ -15,6 +15,7 @@ const LOWPASS_HZ: f32 = 7_600.0;
 const LOOKAHEAD: f32 = 0.02;
 const TAP_GAP: Duration = Duration::from_millis(40);
 const IDLE_CLOSE: Duration = Duration::from_secs(3);
+const SOUND_COUNT: usize = Sound::ThemeDark as usize + 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sound {
@@ -214,6 +215,7 @@ struct Player {
 
 fn run(receiver: Receiver<Sound>) {
     let mut stream: Option<OutputStream> = None;
+    let mut cache: [Option<Vec<f32>>; SOUND_COUNT] = [const { None }; SOUND_COUNT];
     loop {
         let next = if stream.is_some() {
             receiver.recv_timeout(IDLE_CLOSE)
@@ -231,9 +233,10 @@ fn run(receiver: Receiver<Sound>) {
                         });
                 }
                 if let Some(stream) = &stream {
+                    let samples = cache[sound as usize].get_or_insert_with(|| synthesize(sound));
                     stream
                         .mixer()
-                        .add(SamplesBuffer::new(1, SAMPLE_RATE, synthesize(sound)));
+                        .add(SamplesBuffer::new(1, SAMPLE_RATE, samples.clone()));
                 }
             }
             Err(RecvTimeoutError::Timeout) => stream = None,

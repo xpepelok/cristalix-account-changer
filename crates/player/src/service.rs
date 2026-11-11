@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -75,7 +75,7 @@ impl Slot {
 #[derive(Default)]
 struct Cache {
     slots: HashMap<String, Slot>,
-    dirty: bool,
+    dirty: HashSet<String>,
 }
 
 #[derive(Default)]
@@ -94,6 +94,7 @@ pub struct PlayerService {
     http: Client,
     cache: Mutex<Cache>,
     gate: Mutex<Gate>,
+    inflight: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl PlayerService {
@@ -116,6 +117,7 @@ impl PlayerService {
             http,
             cache: Mutex::default(),
             gate: Mutex::default(),
+            inflight: Mutex::default(),
         })
     }
 
@@ -146,6 +148,30 @@ impl PlayerService {
 
     pub async fn fetch(&self, name: &str) -> Option<Arc<PlayerInfo>> {
         let key = cache_key(name);
+        if let Some(fresh) = self.fresh(&key) {
+            return fresh;
+        }
+        let turn = Arc::clone(self.inflight.lock().entry(key.clone()).or_default());
+        let guard = turn.lock().await;
+        let info = self.fetch_exclusive(name, key.clone()).await;
+        drop(guard);
+        let mut inflight = self.inflight.lock();
+        if Arc::strong_count(&turn) <= 2 {
+            inflight.remove(&key);
+        }
+        info
+    }
+
+    fn fresh(&self, key: &str) -> Option<Option<Arc<PlayerInfo>>> {
+        self.cache
+            .lock()
+            .slots
+            .get(key)
+            .filter(|slot| slot.is_fresh(SystemTime::now()))
+            .map(|slot| slot.info.clone())
+    }
+
+    async fn fetch_exclusive(&self, name: &str, key: String) -> Option<Arc<PlayerInfo>> {
         let previous = self.cache.lock().slots.get(&key).cloned();
         if let Some(slot) = &previous
             && slot.is_fresh(SystemTime::now())
@@ -218,16 +244,30 @@ impl PlayerService {
 
     pub fn take_dirty(&self) -> Option<Vec<CacheEntry>> {
         let mut cache = self.cache.lock();
-        if !cache.dirty {
+        if cache.dirty.is_empty() {
             return None;
         }
-        cache.dirty = false;
-        Some(collect_entries(&cache))
+        let Cache { slots, dirty } = &mut *cache;
+        let entries = dirty
+            .drain()
+            .filter_map(|key| {
+                let slot = slots.get(&key)?;
+                let info = PlayerInfo::clone(slot.info.as_ref()?);
+                Some(CacheEntry {
+                    key,
+                    info,
+                    fetched_at: slot.fetched_at,
+                })
+            })
+            .collect();
+        Some(entries)
     }
 
     fn store(&self, key: String, info: Option<Arc<PlayerInfo>>, fetched_at: SystemTime) {
         let mut cache = self.cache.lock();
-        cache.dirty |= info.is_some();
+        if info.is_some() {
+            cache.dirty.insert(key.clone());
+        }
         cache.slots.insert(key, Slot { info, fetched_at });
     }
 
@@ -407,6 +447,31 @@ mod tests {
         let service = PlayerService::new().unwrap();
         service.import([entry("cached", Duration::from_secs(5))]);
         assert_eq!(service.fetch("Cached").await.unwrap().name, "cached");
+    }
+
+    #[tokio::test]
+    async fn concurrent_fetches_share_a_turn_and_clean_up() {
+        let service = PlayerService::new().unwrap();
+        service.import([entry("stale", CACHE_TTL + Duration::from_secs(5))]);
+        service.start_cooldown(Duration::from_secs(60));
+        let (first, second) = tokio::join!(service.fetch("stale"), service.fetch("STALE"));
+        assert_eq!(first.unwrap().name, "stale");
+        assert_eq!(second.unwrap().name, "stale");
+        assert!(service.inflight.lock().is_empty());
+    }
+
+    #[test]
+    fn take_dirty_returns_only_changed_entries() {
+        let service = PlayerService::new().unwrap();
+        service.import([entry("old", Duration::from_secs(1))]);
+        service.store(
+            "new".into(),
+            Some(Arc::new(PlayerInfo::default())),
+            SystemTime::now(),
+        );
+        let dirty = service.take_dirty().unwrap();
+        assert_eq!(dirty.len(), 1);
+        assert_eq!(dirty[0].key, "new");
     }
 
     #[test]

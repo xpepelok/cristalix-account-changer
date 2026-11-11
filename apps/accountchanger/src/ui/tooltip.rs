@@ -1,7 +1,7 @@
 use gpui::{
     AnimationExt, App, Bounds, FontWeight, Global, InteractiveElement, IntoElement, ParentElement,
-    Pixels, SharedString, Stateful, StatefulInteractiveElement, Styled, TextRun, Window, canvas,
-    div, prelude::FluentBuilder, px,
+    Pixels, SharedString, Stateful, StatefulInteractiveElement, Styled, Window, canvas, div,
+    prelude::FluentBuilder, px,
 };
 
 use crate::motion::Key;
@@ -92,33 +92,15 @@ pub fn tooltip_overlay(window: &mut Window, cx: &mut App) -> Option<impl IntoEle
     let anchor = state.bounds?;
     let p = cx.palette();
     let font_size = rem(0.76);
-    let lines: Vec<SharedString> = text
+    let natural: Vec<f32> = text
         .split('\n')
-        .map(|line| SharedString::from(line.to_owned()))
+        .map(|line| {
+            crate::ui::fit::text_width(line, f32::from(font_size), FontWeight::MEDIUM, 0.0, window)
+                .ceil()
+                + PAD_X * 2.0
+                + 4.0
+        })
         .collect();
-    let line_width = |line: &SharedString| {
-        let run = TextRun {
-            len: line.len(),
-            font: gpui::Font {
-                weight: FontWeight::MEDIUM,
-                ..gpui::font(crate::theme::FONT_FAMILY)
-            },
-            color: p.text,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
-        f32::from(
-            window
-                .text_system()
-                .shape_line(line.clone(), font_size, &[run], None)
-                .width,
-        )
-        .ceil()
-            + PAD_X * 2.0
-            + 4.0
-    };
-    let natural: Vec<f32> = lines.iter().map(line_width).collect();
     let viewport = window.viewport_size();
     let vw = f32::from(viewport.width);
     let width = natural.iter().copied().fold(0.0, f32::max).min(MAX_WIDTH);
@@ -156,7 +138,10 @@ pub fn tooltip_overlay(window: &mut Window, cx: &mut App) -> Option<impl IntoEle
             .when(!wraps, |tip| tip.whitespace_nowrap())
             .flex()
             .flex_col()
-            .children(lines.into_iter().map(|line| div().child(line)))
+            .children(
+                text.split('\n')
+                    .map(|line| div().child(SharedString::from(line.to_owned()))),
+            )
             .with_animation(
                 gpui::ElementId::Name(format!("tooltip-{key:?}").into()),
                 gpui::Animation::new(std::time::Duration::from_millis(120))

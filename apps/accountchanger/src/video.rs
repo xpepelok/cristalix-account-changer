@@ -152,9 +152,10 @@ fn pump(
             next = Instant::now();
             continue;
         }
-        let mut buffer = vec![0; size];
-        if stdout.read_exact(&mut buffer).is_err() {
-            break;
+        let mut buffer = Vec::with_capacity(size);
+        match (&mut stdout).take(size as u64).read_to_end(&mut buffer) {
+            Ok(read) if read == size => {}
+            _ => break,
         }
         let rate = *fps_value
             .get_or_insert_with(|| fps.recv_timeout(FPS_WAIT).unwrap_or(MAX_FPS).min(MAX_FPS));

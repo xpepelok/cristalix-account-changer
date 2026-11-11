@@ -50,13 +50,17 @@ const RING: [(f32, f32); 9] = [
 ];
 const ICON_SCALE: f32 = 17.0 / 24.0;
 const BARS: [(f32, f32, f32, f32); 3] = [
-    (4.0, 10.0, 1.25, 0.0),
-    (12.0, 16.0, 1.12, 0.06),
-    (20.0, 7.0, 1.3, 0.12),
+    (5.5, 7.0, 1.3, 0.0),
+    (12.0, 11.0, 1.2, 0.06),
+    (18.5, 15.0, 1.12, 0.12),
 ];
+const BAR_WIDTH: f32 = 2.4;
+const BAR_BOTTOM: f32 = 20.0;
 
-fn stats_bars(progress: f32, entering: bool, color: gpui::Hsla) -> gpui::Div {
-    let stroke = 1.6 * ICON_SCALE;
+fn stats_bars(progress: f32, entering: bool, color: gpui::Hsla, scale: f32) -> gpui::Div {
+    let snap = |value: f32| (value * scale).round() / scale;
+    let stroke = snap(BAR_WIDTH * ICON_SCALE).max(1.0 / scale);
+    let bottom = snap(BAR_BOTTOM * ICON_SCALE);
     div()
         .relative()
         .size(px(17.0))
@@ -67,15 +71,15 @@ fn stats_bars(progress: f32, entering: bool, color: gpui::Hsla) -> gpui::Div {
             } else {
                 1.0 - motion::cubic_bezier(motion::EASE, 1.0 - progress)
             };
-            let scale = 1.0 + (grow - 1.0) * factor;
-            let height = length * scale * ICON_SCALE + stroke;
+            let height = length * (1.0 + (grow - 1.0) * factor) * ICON_SCALE;
             div()
                 .absolute()
-                .left(px(x * ICON_SCALE - stroke / 2.0))
-                .top(px(20.0 * ICON_SCALE + stroke / 2.0 - height))
+                .left(px(snap(x * ICON_SCALE - stroke / 2.0)))
+                .top(px(bottom - height))
                 .w(px(stroke))
                 .h(px(height))
-                .rounded_full()
+                .rounded_t(px(stroke / 2.0))
+                .rounded_b(px(stroke / 4.0))
                 .bg(color)
         }))
 }
@@ -161,8 +165,9 @@ impl Shell {
         } else {
             "Тёмная тема"
         };
-        let bell_open = self.popup_shown(&Popup::Bell).is_some();
-        let bell_active = self.popup_shown(&Popup::Bell) == Some(None);
+        let bell_shown = self.popup_shown(&Popup::Bell);
+        let bell_open = bell_shown.is_some();
+        let bell_active = bell_shown == Some(None);
         let light = theme == Theme::Light;
         if motion::is_on(THEME_SWAP, cx) != light && motion::running(THEME_SWAP, cx).is_none() {
             motion::drive(THEME_SWAP, light, Duration::ZERO, motion::EASE, window, cx);
@@ -174,7 +179,12 @@ impl Shell {
 
         let bars_progress = motion::value(STATS_PULSE, cx);
         let stats_color = hover_color("stats-btn", cx);
-        let stats_icon = stats_bars(bars_progress, motion::is_on(STATS_PULSE, cx), stats_color);
+        let stats_icon = stats_bars(
+            bars_progress,
+            motion::is_on(STATS_PULSE, cx),
+            stats_color,
+            window.scale_factor(),
+        );
 
         let logs_color = hover_color("logs-btn", cx);
         let logs_hovered = motion::is_on(Key::of("logs-btn"), cx);

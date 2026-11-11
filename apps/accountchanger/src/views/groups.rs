@@ -94,7 +94,17 @@ impl GroupsView {
         let p = cx.palette();
         let store = shell.store.read(cx);
         let groups = ordered(&store.groups, &self.order);
-        let accounts: Vec<Account> = store.accounts.clone();
+        let expanded_members: Vec<Account> = groups
+            .iter()
+            .find(|group| self.expanded.as_deref() == Some(group.id.as_str()))
+            .map(|group| {
+                group
+                    .members
+                    .iter()
+                    .filter_map(|uuid| store.account(uuid).cloned())
+                    .collect()
+            })
+            .unwrap_or_default();
         let rows: Vec<AnyElement> = groups
             .iter()
             .map(|group| {
@@ -228,13 +238,13 @@ impl GroupsView {
                     .child(
                         small_button_keyed("gm-rename", &id, "Переименовать", false, cx).on_click(
                             cx.listener({
-                                let group = group.clone();
+                                let (id, name) = (id.clone(), group.name.clone());
                                 move |this, _, window, cx| {
                                     sound::play(Sound::Tap);
-                                    let id = group.id.clone();
+                                    let id = id.clone();
                                     this.prompt(
                                         "Новое название группы",
-                                        group.name.clone(),
+                                        name.clone(),
                                         GROUP_NAME_MAX_CHARS,
                                         move |this, name, _, cx| {
                                             this.store.update(cx, |store, cx| {
@@ -252,16 +262,13 @@ impl GroupsView {
                     .child(
                         small_button_keyed("gm-delete", &id, "Удалить", true, cx).on_click(
                             cx.listener({
-                                let group = group.clone();
+                                let (id, name) = (id.clone(), group.name.clone());
                                 move |this, _, window, cx| {
                                     sound::play(Sound::Tap);
-                                    let id = group.id.clone();
+                                    let id = id.clone();
                                     this.confirm(
                                         "Удалить группу?",
-                                        format!(
-                                            "Вы уверены, что хотите удалить группу «{}»?",
-                                            group.name
-                                        ),
+                                        format!("Вы уверены, что хотите удалить группу «{name}»?"),
                                         "Да, удалить",
                                         move |this, _, cx| {
                                             if this.home.group.as_deref() == Some(id.as_str()) {
@@ -285,11 +292,7 @@ impl GroupsView {
                         ),
                     );
                 let members = expanded.then(|| {
-                    let list: Vec<&Account> = group
-                        .members
-                        .iter()
-                        .filter_map(|uuid| accounts.iter().find(|a| &a.uuid == uuid))
-                        .collect();
+                    let list = &expanded_members;
                     let add_key = Key::new("gm-add", &group.id);
                     let add_hover = motion::value(add_key, cx);
                     div()
@@ -312,7 +315,7 @@ impl GroupsView {
                                     .child("В группе нет аккаунтов"),
                             )
                         })
-                        .children(list.into_iter().map(|account| {
+                        .children(list.iter().map(|account| {
                             let remove_key = Key::new("gm-remove", (&group.id, &account.uuid));
                             let remove_hover = motion::value(remove_key, cx);
                             let target = (group.id.clone(), account.uuid.clone());
@@ -585,11 +588,11 @@ impl AddMembersView {
     ) -> AnyElement {
         let p = cx.palette();
         let store = shell.store.read(cx);
-        let Some(group) = store.group(&self.group).cloned() else {
+        let Some(group) = store.group(&self.group) else {
             return div().into_any_element();
         };
         let query = self.search.read(cx).text().trim().to_lowercase();
-        let candidates: Vec<Account> = store
+        let candidates: Vec<&Account> = store
             .accounts
             .iter()
             .filter(|a| !group.members.contains(&a.uuid))
@@ -599,7 +602,6 @@ impl AddMembersView {
                         .to_lowercase()
                         .contains(&query)
             })
-            .cloned()
             .collect();
         let focused = self.search.read(cx).is_focused(window);
         let cards: Vec<AnyElement> = candidates
@@ -743,6 +745,7 @@ impl AddMembersView {
                 .children(cards)
                 .into_any_element()
         };
+        let title = format!("Добавить в «{}»", group.name);
         let height = f32::from(window.viewport_size().height) * 0.56;
         ModalFrame::new(
             "addmembers-overlay",
@@ -751,11 +754,7 @@ impl AddMembersView {
         )
         .max_width_fraction(0.94)
         .padding(0.0, 20.0, 20.0, 20.0)
-        .child(div().mx(px(-20.0)).child(modal_head(
-            format!("Добавить в «{}»", group.name),
-            None,
-            cx,
-        )))
+        .child(div().mx(px(-20.0)).child(modal_head(title, None, cx)))
         .child(
             div()
                 .flex()

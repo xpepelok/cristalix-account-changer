@@ -68,22 +68,38 @@ impl PlayerInfo {
         })
     }
 
-    fn donate_rank(&self, colors: &[&str]) -> Option<Rank> {
-        (!self.donate.is_empty() && self.donate != "NO").then(|| Rank {
-            label: self.donate.clone(),
-            color: first_non_empty(colors.iter().copied(), DONATE_RANK_COLOR),
+    fn staffless(&self) -> bool {
+        self.staff.is_empty() || self.staff == PLAYER_RANK_LABEL
+    }
+
+    fn donate_rank(&self) -> Option<Rank> {
+        if self.donate.is_empty() || self.donate == "NO" {
+            return None;
+        }
+        Some(if self.staffless() {
+            Rank {
+                label: first_non_empty([self.label.as_str()], &self.donate),
+                color: first_non_empty(
+                    [self.color.as_str(), self.donate_color.as_str()],
+                    DONATE_RANK_COLOR,
+                ),
+            }
+        } else {
+            Rank {
+                label: self.donate.replace("_PLUS", "+").replace('_', " "),
+                color: first_non_empty([self.donate_color.as_str()], DONATE_RANK_COLOR),
+            }
         })
     }
 
     pub fn primary_rank(&self) -> Option<Rank> {
-        self.staff_rank()
-            .or_else(|| self.donate_rank(&[&self.donate_color, &self.color]))
+        self.staff_rank().or_else(|| self.donate_rank())
     }
 
     pub fn ranks(&self) -> Vec<Rank> {
         self.staff_rank()
             .into_iter()
-            .chain(self.donate_rank(&[&self.donate_color]))
+            .chain(self.donate_rank())
             .collect()
     }
 }

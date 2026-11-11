@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use parking_lot::RwLock;
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, SqliteExecutor, SqlitePool};
 use tokio::sync::watch;
 
 use ac_platform::Secrets;
@@ -124,6 +124,14 @@ impl Store {
     }
 
     pub(crate) async fn persist_account(&self, account: &Account) -> Result<()> {
+        self.write_account(&self.pool, account).await
+    }
+
+    async fn write_account<'e>(
+        &self,
+        executor: impl SqliteExecutor<'e>,
+        account: &Account,
+    ) -> Result<()> {
         let token = seal(&self.secrets, &account.token)?;
         sqlx::query(
             "INSERT INTO accounts (uuid, name, token, label, pinned, client, profile, ram, \
@@ -161,7 +169,7 @@ impl Store {
         .bind(account.last_seen)
         .bind(account.last_launched)
         .bind(account.last_online)
-        .execute(&self.pool)
+        .execute(executor)
         .await?;
         Ok(())
     }
@@ -267,9 +275,11 @@ impl Store {
         if changed.is_empty() {
             return Ok(false);
         }
+        let mut tx = self.pool.begin().await?;
         for account in &changed {
-            self.persist_account(account).await?;
+            self.write_account(&mut *tx, account).await?;
         }
+        tx.commit().await?;
         self.bump();
         Ok(true)
     }
@@ -359,16 +369,24 @@ impl Store {
             return Ok(());
         }
         self.online_flush.store(now, Ordering::Relaxed);
-        let snapshot: Vec<Account> = {
+        let snapshot: Vec<(String, i64, i64)> = {
             let state = self.vault.read();
             uuids
                 .iter()
-                .filter_map(|uuid| state.accounts.get(uuid).cloned())
+                .filter_map(|uuid| state.accounts.get(uuid))
+                .map(|account| (account.uuid.clone(), account.last_seen, account.last_online))
                 .collect()
         };
-        for account in &snapshot {
-            self.persist_account(account).await?;
+        let mut tx = self.pool.begin().await?;
+        for (uuid, last_seen, last_online) in &snapshot {
+            sqlx::query("UPDATE accounts SET last_seen = ?2, last_online = ?3 WHERE uuid = ?1")
+                .bind(uuid)
+                .bind(last_seen)
+                .bind(last_online)
+                .execute(&mut *tx)
+                .await?;
         }
+        tx.commit().await?;
         self.bump();
         Ok(())
     }

@@ -102,15 +102,7 @@ impl GameTracker {
     }
 
     pub fn resolve(&self) -> Presence {
-        let scan = self.games.scan();
-        let presence = {
-            let mut launched = self.launched.lock();
-            let (presence, changed) = resolve_records(&mut launched, &scan, now());
-            if changed {
-                self.persist(&launched);
-            }
-            presence
-        };
+        let presence = self.resolve_launched();
         self.presence.send_if_modified(|current| {
             if *current == presence {
                 return false;
@@ -118,6 +110,19 @@ impl GameTracker {
             *current = presence.clone();
             true
         });
+        presence
+    }
+
+    fn resolve_launched(&self) -> Presence {
+        if self.launched.lock().is_empty() {
+            return Presence::default();
+        }
+        let scan = self.games.scan();
+        let mut launched = self.launched.lock();
+        let (presence, changed) = resolve_records(&mut launched, &scan, now());
+        if changed {
+            self.persist(&launched);
+        }
         presence
     }
 

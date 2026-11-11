@@ -1,7 +1,8 @@
 use ac_api::{Account, PunishmentKind, TokenState, Violation};
 use gpui::{
     Context, ElementId, FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
+    ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    prelude::FluentBuilder, px,
 };
 
 use crate::assets::{Icon, icon};
@@ -17,18 +18,17 @@ pub const AVATAR_SIZE: f32 = 46.0;
 
 impl Shell {
     pub(crate) fn render_card(
-        &mut self,
+        &self,
         account: &Account,
         width: f32,
         window: &Window,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> impl IntoElement + use<> {
         let p = cx.palette();
         let store = self.store.read(cx);
         let rank = store.display_rank(account);
         let status = store.online_status(account);
         let uuid = account.uuid.clone();
-        let cabinet = store.cabinet_view(&uuid);
         let key = Key::new("card", &uuid);
         let hover = motion::value(key, cx);
         let token = if self.home.debug_expired && account.launchable {
@@ -65,16 +65,20 @@ impl Shell {
         if token == TokenState::Missing {
             meta_budget -= fit::text_width("НЕТ ТОКЕНА", 9.6, FontWeight::BOLD, 0.4, window) + 21.0;
         }
-        let punishments: Vec<(PunishmentKind, Violation)> = cabinet
-            .status
-            .iter()
+        let punishments: Vec<(PunishmentKind, SharedString)> = store
+            .cabinet
+            .get(&uuid)
+            .and_then(|cabinet| cabinet.status.as_ref())
+            .into_iter()
             .flat_map(|status| {
                 [
-                    status.ban.clone().map(|ban| (PunishmentKind::Ban, ban)),
-                    status.mute.clone().map(|mute| (PunishmentKind::Mute, mute)),
+                    (PunishmentKind::Ban, status.ban.as_ref()),
+                    (PunishmentKind::Mute, status.mute.as_ref()),
                 ]
             })
-            .flatten()
+            .filter_map(|(kind, violation)| {
+                violation.map(|violation| (kind, punish_tooltip(kind, violation).into()))
+            })
             .collect();
         meta_budget -= punishments.len() as f32 * (CHIP_ICON_ONLY + CHIP_GAP);
         let time_width = time.as_ref().map_or(0.0, |time| {
@@ -135,7 +139,7 @@ impl Shell {
             .when_some(dot, |wrap, color| {
                 let dot_key = Key::new("card-dot", &uuid);
                 let dot = div()
-                    .id(ElementId::Name(format!("dot-{uuid}").into()))
+                    .id("dot")
                     .absolute()
                     .right(px(-2.0))
                     .bottom(px(-2.0))
@@ -154,7 +158,7 @@ impl Shell {
                 let toggled = uuid.clone();
                 wrap.child(
                     div()
-                        .id(ElementId::Name(format!("pick-{uuid}").into()))
+                        .id("pick")
                         .absolute()
                         .left(px(-6.0))
                         .top(px(-6.0))
@@ -191,7 +195,7 @@ impl Shell {
         let pinned = account.pinned;
         let pin = with_tooltip(
             div()
-                .id(ElementId::Name(format!("pin-{uuid}").into()))
+                .id("pin")
                 .flex()
                 .flex_none()
                 .items_center()
@@ -255,7 +259,7 @@ impl Shell {
                 let warn_key = Key::new("card-warn", &uuid);
                 row.child(with_tooltip(
                     div()
-                        .id(ElementId::Name(format!("warn-{uuid}").into()))
+                        .id("warn")
                         .flex()
                         .flex_none()
                         .items_center()
@@ -295,8 +299,8 @@ impl Shell {
             })
             .children(
                 punishments
-                    .iter()
-                    .map(|(kind, violation)| punishment_chip(&uuid, *kind, violation, &p)),
+                    .into_iter()
+                    .map(|(kind, tip)| punishment_chip(&uuid, kind, tip, &p)),
             )
             .when_some(status, |meta, status| {
                 meta.child(Badge::status(status.text, status.on).size(status_size))
@@ -325,38 +329,31 @@ impl Shell {
                 },
             )
         };
-        let mut play = IconButton::new(
-            ElementId::Name(format!("play-{uuid}").into()),
-            play_key,
-            style,
-        )
-        .on_secondary(cx.listener({
-            let uuid = uuid.clone();
-            move |this, event: &gpui::ClickEvent, _, cx| {
-                let position = event.position();
-                this.set_popup(Some(Popup::Card {
-                    uuid: uuid.clone(),
-                    x: f32::from(position.x),
-                    y: f32::from(position.y),
-                }));
-                cx.notify();
-            }
-        }))
-        .tooltip(tip)
-        .on_click(cx.listener({
-            let uuid = uuid.clone();
-            move |this, _, _, cx| {
-                cx.stop_propagation();
-                this.store
-                    .update(cx, |store, cx| store.toggle_play(&uuid, cx));
-            }
-        }));
+        let mut play = IconButton::new("play", play_key, style)
+            .on_secondary(cx.listener({
+                let uuid = uuid.clone();
+                move |this, event: &gpui::ClickEvent, _, cx| {
+                    let position = event.position();
+                    this.set_popup(Some(Popup::Card {
+                        uuid: uuid.clone(),
+                        x: f32::from(position.x),
+                        y: f32::from(position.y),
+                    }));
+                    cx.notify();
+                }
+            }))
+            .tooltip(tip)
+            .on_click(cx.listener({
+                let uuid = uuid.clone();
+                move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.store
+                        .update(cx, |store, cx| store.toggle_play(&uuid, cx));
+                }
+            }));
         play = match style {
             IconStyle::Stop => play.content(div().size(px(13.0)).rounded(px(3.0)).bg(p.white)),
-            IconStyle::Busy => play.content(Spinner::new(
-                ElementId::Name(format!("spin-{uuid}").into()),
-                16.0,
-            )),
+            IconStyle::Busy => play.content(Spinner::new("spin", 16.0)),
             _ => play.icon(Icon::Play, 20.0),
         };
 
@@ -514,7 +511,7 @@ fn punish_tooltip(kind: PunishmentKind, violation: &Violation) -> String {
 fn punishment_chip(
     uuid: &str,
     kind: PunishmentKind,
-    violation: &Violation,
+    tip: SharedString,
     p: &crate::theme::Palette,
 ) -> gpui::Stateful<gpui::Div> {
     let (color, glyph, name) = match kind {
@@ -522,7 +519,7 @@ fn punishment_chip(
         PunishmentKind::Mute => (crate::theme::rgb(0xe08636), Icon::Muted, "card-mute"),
     };
     let chip = div()
-        .id(ElementId::Name(format!("{name}-{uuid}").into()))
+        .id(name)
         .flex()
         .flex_none()
         .items_center()
@@ -531,9 +528,5 @@ fn punishment_chip(
         .rounded_full()
         .bg(gpui::Hsla { a: 0.15, ..color })
         .child(icon(glyph, px(12.5), color));
-    with_tooltip(
-        chip,
-        Key::new(name, uuid),
-        punish_tooltip(kind, violation).into(),
-    )
+    with_tooltip(chip, Key::new(name, uuid), tip)
 }

@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use ac_platform::{Paths, Secrets};
-use ac_store::{Claims, GameLaunch, LaunchOpts, LauncherKind, LegacyPaths, Store, Theme, jwt};
+use ac_store::{
+    Claims, GameLaunch, LaunchOpts, LauncherKind, LegacyPaths, PlayerCacheEntry, Store, Theme, jwt,
+};
 use tempfile::TempDir;
 
 struct Fixture {
@@ -248,6 +250,62 @@ async fn player_cache_round_trip() {
     assert_eq!(cache[0].fetched_at, 1234);
     store.prune_players(2000).await.unwrap();
     assert!(store.load_player_cache().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn player_cache_batch_upsert_overwrites() {
+    let fx = Fixture::new();
+    let store = fx.open().await;
+    store.upsert_player("steve", "{}", 1).await.unwrap();
+    store
+        .upsert_players(&[
+            PlayerCacheEntry {
+                name: "steve".to_owned(),
+                info_json: r#"{"name":"Steve"}"#.to_owned(),
+                fetched_at: 5,
+            },
+            PlayerCacheEntry {
+                name: "alex".to_owned(),
+                info_json: r#"{"name":"Alex"}"#.to_owned(),
+                fetched_at: 6,
+            },
+        ])
+        .await
+        .unwrap();
+    let mut cache = store.load_player_cache().await.unwrap();
+    cache.sort_by(|a, b| a.name.cmp(&b.name));
+    assert_eq!(cache.len(), 2);
+    assert_eq!(cache[1].name, "steve");
+    assert_eq!(cache[1].fetched_at, 5);
+    assert_eq!(cache[1].info_json, r#"{"name":"Steve"}"#);
+}
+
+#[tokio::test]
+async fn touch_online_and_bulk_settings_persist() {
+    let fx = Fixture::new();
+    {
+        let store = fx.open().await;
+        store
+            .upsert_token("Steve", "t-steve", &claims("u-steve", 100))
+            .await
+            .unwrap();
+        store
+            .upsert_token("Alex", "t-alex", &claims("u-alex", 100))
+            .await
+            .unwrap();
+        store
+            .set_ram(&["u-steve".to_owned(), "u-alex".to_owned()], 2048)
+            .await
+            .unwrap();
+        store.touch_online(&["u-steve".to_owned()]).await.unwrap();
+    }
+    let store = fx.open().await;
+    let steve = store.get("u-steve").unwrap();
+    assert!(steve.last_online > 0);
+    assert_eq!(steve.token, "t-steve");
+    assert_eq!(steve.ram, 2048);
+    assert_eq!(store.get("u-alex").unwrap().ram, 2048);
+    assert_eq!(store.get("u-alex").unwrap().last_online, 0);
 }
 
 #[tokio::test]

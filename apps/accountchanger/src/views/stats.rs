@@ -3,7 +3,7 @@ use std::time::Duration;
 use ac_api::LogStats;
 use gpui::{
     Animation, AnimationExt, AnyElement, Context, ElementId, FontWeight, Hsla, IntoElement,
-    ParentElement, Styled, Window, div, prelude::FluentBuilder, px,
+    ParentElement, SharedString, Styled, Window, div, prelude::FluentBuilder, px,
 };
 
 use crate::format::duration_words;
@@ -32,9 +32,9 @@ impl StatsView {
         cx: &mut Context<Shell>,
     ) -> AnyElement {
         let p = cx.palette();
-        let tiles: Vec<(Value, String)> = match &self.stats {
+        let tiles: Vec<(Value, SharedString)> = match &self.stats {
             None => Vec::new(),
-            Some(Err(())) => vec![(Value::Missing, "Не удалось загрузить".to_owned())],
+            Some(Err(())) => vec![(Value::Missing, "Не удалось загрузить".into())],
             Some(Ok(stats)) => {
                 let person = |uuid: &str, name: &str| {
                     if name.is_empty() {
@@ -49,41 +49,42 @@ impl StatsView {
                 vec![
                     (
                         Value::Plain(stats.total_accounts.to_string(), None),
-                        "Аккаунтов в логах".to_owned(),
+                        "Аккаунтов в логах".into(),
                     ),
                     (
                         Value::Plain(stats.total_sessions.to_string(), None),
-                        "Всего сессий запуска".to_owned(),
+                        "Всего сессий запуска".into(),
                     ),
                     (
                         Value::Plain(
                             stats.active_now.to_string(),
                             (stats.active_now > 0).then_some(p.green),
                         ),
-                        "Активно сейчас".to_owned(),
+                        "Активно сейчас".into(),
                     ),
                     (
                         Value::Plain(duration_words(stats.avg_duration), None),
-                        "Среднее время сессии".to_owned(),
+                        "Среднее время сессии".into(),
                     ),
                     (
                         Value::Plain(duration_words(stats.total_duration), None),
-                        "Суммарное время сессий".to_owned(),
+                        "Суммарное время сессий".into(),
                     ),
                     (
                         person(&stats.longest_uuid, &stats.longest_name),
                         format!(
                             "Самая долгая сессия ({})",
                             duration_words(stats.longest_duration)
-                        ),
+                        )
+                        .into(),
                     ),
                     (
                         person(&stats.most_launched_uuid, &stats.most_launched_name),
-                        "Чаще всего запускался".to_owned(),
+                        "Чаще всего запускался".into(),
                     ),
                     (
                         Value::Plain(stats.total_lines.to_string(), None),
-                        "Строк логов записано".to_owned(),
+                        "Строк логов записано".into(),
                     ),
                 ]
             }

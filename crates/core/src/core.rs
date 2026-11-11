@@ -9,7 +9,7 @@ use ac_launcher::{
 use ac_platform::{Paths, Secrets};
 use ac_player::{CACHE_MAX_AGE, CacheEntry, FLUSH_INTERVAL, PlayerService, TextureClient};
 use ac_stats::StatsService;
-use ac_store::{LegacyPaths, Store};
+use ac_store::{LegacyPaths, PlayerCacheEntry, Store};
 use ac_update::Updater;
 use anyhow::Context as _;
 use tokio::runtime::{Builder, Handle, Runtime};
@@ -249,14 +249,17 @@ impl Inner {
         let Some(entries) = self.players.take_dirty() else {
             return;
         };
-        for entry in entries {
-            if let Ok(json) = serde_json::to_string(&entry.info) {
-                let _ = self
-                    .store
-                    .upsert_player(&entry.key, &json, to_unix(entry.fetched_at))
-                    .await;
-            }
-        }
+        let rows: Vec<PlayerCacheEntry> = entries
+            .into_iter()
+            .filter_map(|entry| {
+                Some(PlayerCacheEntry {
+                    info_json: serde_json::to_string(&entry.info).ok()?,
+                    fetched_at: to_unix(entry.fetched_at),
+                    name: entry.key,
+                })
+            })
+            .collect();
+        let _ = self.store.upsert_players(&rows).await;
     }
 
     pub(crate) async fn online_stats(&self) -> OnlineStats {

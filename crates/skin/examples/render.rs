@@ -51,7 +51,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 &output.join(format!("{id}-{name}.png")),
                 WIDTH,
                 HEIGHT,
-                frame,
+                &frame,
             )?;
         }
         for size in [26, 46, 128] {

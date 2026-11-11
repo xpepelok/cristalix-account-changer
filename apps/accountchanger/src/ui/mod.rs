@@ -16,7 +16,7 @@ pub use input::{InputEvent, TextInput, bind_keys as bind_input_keys};
 pub use menu::{MenuItem, drop_in, menu_item, menu_separator, menu_surface, pop_in};
 pub use modal::{ModalFrame, modal_head};
 pub use scroll::{ScrollArea, scrollbar};
-pub use text::spaced;
+pub use text::{spaced, spaced_chars};
 pub use tooltip::{Tooltips, tooltip_overlay, with_tooltip};
 
 use gpui::{App, ClickEvent, Window};

@@ -12,9 +12,13 @@ pub const NARROW_WIDTH: f32 = 520.0;
 
 pub const BASE_TEXT: f32 = 15.0;
 
+static TABULAR: std::sync::LazyLock<gpui::FontFeatures> = std::sync::LazyLock::new(|| {
+    gpui::FontFeatures(std::sync::Arc::new(vec![("tnum".to_owned(), 1)]))
+});
+
 pub fn tabular(weight: gpui::FontWeight) -> gpui::Font {
     gpui::Font {
-        features: gpui::FontFeatures(std::sync::Arc::new(vec![("tnum".to_owned(), 1)])),
+        features: TABULAR.clone(),
         weight,
         ..gpui::font(FONT_FAMILY)
     }

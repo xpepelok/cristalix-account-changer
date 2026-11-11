@@ -195,7 +195,15 @@ impl AccountView {
             .player(&account.name)
             .map(|info| info.ranks())
             .unwrap_or_default();
-        let profiles = store.profiles.profiles.clone();
+        let profiles = &store.profiles.profiles;
+        let mut options = Vec::with_capacity(profiles.len() + 1);
+        options.push((String::new(), "- не выбран -".to_owned()));
+        options.extend(profiles.iter().map(|name| (name.clone(), name.clone())));
+        let current = if profiles.contains(&account.profile) {
+            account.profile.clone()
+        } else {
+            String::new()
+        };
         let cabinet = store.cabinet_view(&account.uuid);
         let has_skin = matches!(store.skin_texture(&account.uuid), Some(Texture::Ready(_)));
         let has_cape = self.cape.is_some();
@@ -551,13 +559,6 @@ impl AccountView {
             .gap(px(8.0))
             .children(rows);
 
-        let mut options = vec![(String::new(), "- не выбран -".to_owned())];
-        options.extend(profiles.iter().map(|name| (name.clone(), name.clone())));
-        let current = if profiles.contains(&account.profile) {
-            account.profile.clone()
-        } else {
-            String::new()
-        };
         let profile_uuid = uuid.clone();
         let profile_row = div()
             .flex()
@@ -964,6 +965,7 @@ impl Shell {
                     let live = window.is_window_active();
                     let skin = match shell.store.read(cx).skin_texture(&uuid) {
                         Some(Texture::Ready(skin)) => Some(skin),
+                        Some(Texture::Missing) => return None,
                         _ => None,
                     };
                     let scale = window.scale_factor();

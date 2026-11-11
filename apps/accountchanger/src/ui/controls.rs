@@ -12,7 +12,7 @@ use crate::assets::{Icon, icon};
 use crate::motion::{self, EASE_OUT, Key, cubic_bezier};
 use crate::sound::{self, Sound};
 use crate::theme::{Palette, ThemeExt, alpha, mix, parse_hex, rem, rgba, shadow};
-use crate::ui::spaced;
+use crate::ui::spaced_chars;
 
 type ToggleHandler = Rc<dyn Fn(&bool, &mut Window, &mut App)>;
 type SelectHandler = Rc<dyn Fn(&usize, &mut Window, &mut App)>;
@@ -64,7 +64,10 @@ impl RenderOnce for Chip {
             .text_color(fg)
             .text_size(rem(size))
             .font_weight(FontWeight::EXTRA_BOLD)
-            .child(spaced(&self.label.to_uppercase(), 0.4))
+            .child(spaced_chars(
+                self.label.chars().flat_map(char::to_uppercase),
+                0.4,
+            ))
     }
 }
 
@@ -139,9 +142,10 @@ impl RenderOnce for Badge {
                 .overflow_hidden()
                 .child(self.text)
         } else {
-            base.flex_none()
-                .text_size(rem(0.6))
-                .child(spaced(&self.text.to_uppercase(), 0.4))
+            base.flex_none().text_size(rem(0.6)).child(spaced_chars(
+                self.text.chars().flat_map(char::to_uppercase),
+                0.4,
+            ))
         }
     }
 }

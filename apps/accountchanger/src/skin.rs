@@ -45,7 +45,7 @@ pub enum Texture {
 #[derive(Default)]
 pub struct Skins {
     textures: HashMap<String, Texture>,
-    heads: HashMap<(String, u32), Arc<RenderImage>>,
+    heads: HashMap<String, Vec<(u32, Arc<RenderImage>)>>,
 }
 
 impl Skins {
@@ -66,7 +66,7 @@ impl Skins {
             .as_deref()
             .and_then(|bytes| Skin::from_png(bytes).ok())
             .map_or(Texture::Missing, |skin| Texture::Ready(Arc::new(skin)));
-        self.heads.retain(|(owner, _), _| *owner != uuid);
+        self.heads.remove(&uuid);
         self.textures.insert(uuid, texture);
     }
 
@@ -74,12 +74,18 @@ impl Skins {
         let Some(Texture::Ready(skin)) = self.textures.get(uuid) else {
             return None;
         };
-        let key = (uuid.to_owned(), size);
-        if let Some(image) = self.heads.get(&key) {
+        if let Some((_, image)) = self
+            .heads
+            .get(uuid)
+            .and_then(|sizes| sizes.iter().find(|(cached, _)| *cached == size))
+        {
             return Some(image.clone());
         }
         let image = bgra_image(size, size, skin.head_avatar(size, PixelFormat::Bgra))?;
-        self.heads.insert(key, image.clone());
+        self.heads
+            .entry(uuid.to_owned())
+            .or_default()
+            .push((size, image.clone()));
         Some(image)
     }
 }
@@ -97,19 +103,16 @@ pub struct FrameRequest {
 
 impl FrameRequest {
     pub fn render(self) -> Option<Arc<RenderImage>> {
-        let mut renderer = self.renderer.lock();
         let mut scene = Scene::new(&self.skin, self.cape.as_deref());
         scene.camera = self.camera;
         scene.pose = Pose::idle(self.seconds);
-        let bytes = renderer
-            .render(
-                &scene,
-                self.width,
-                self.height,
-                self.supersample,
-                PixelFormat::Bgra,
-            )
-            .to_vec();
+        let bytes = self.renderer.lock().render(
+            &scene,
+            self.width,
+            self.height,
+            self.supersample,
+            PixelFormat::Bgra,
+        );
         bgra_image(self.width, self.height, bytes)
     }
 }

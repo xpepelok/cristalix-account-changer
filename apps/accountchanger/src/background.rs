@@ -131,15 +131,6 @@ impl Backdrop {
         std::mem::take(&mut self.retired)
     }
 
-    pub fn animated(&self) -> bool {
-        self.image.as_ref().is_some_and(Prepared::animated)
-    }
-
-    pub fn next_change(&self) -> Option<Duration> {
-        let prepared = self.image.as_ref().filter(|prepared| prepared.animated())?;
-        Some(prepared.position(self.started?.elapsed()).1)
-    }
-
     pub fn image(&self, settings: &Background) -> Option<(Arc<RenderImage>, f32)> {
         settings.file.as_ref()?;
         let dim = f32::from(settings.dim.min(100)) / 100.0;

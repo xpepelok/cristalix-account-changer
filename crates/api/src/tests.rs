@@ -58,6 +58,28 @@ fn ranks_follow_staff_then_donate() {
 }
 
 #[test]
+fn donate_rank_uses_game_prefix() {
+    let donor = PlayerInfo {
+        staff: "PLAYER".into(),
+        donate: "PREMIUM_PLUS".into(),
+        label: "P+".into(),
+        ..PlayerInfo::default()
+    };
+    assert_eq!(
+        donor.primary_rank().map(|rank| rank.label),
+        Some("P+".into())
+    );
+    let curator = PlayerInfo {
+        staff: "CURATOR".into(),
+        label: "Cur".into(),
+        donate: "PREMIUM_PLUS".into(),
+        ..PlayerInfo::default()
+    };
+    let labels: Vec<String> = curator.ranks().into_iter().map(|rank| rank.label).collect();
+    assert_eq!(labels, ["Cur", "PREMIUM+"]);
+}
+
+#[test]
 fn unknown_presence_parses() {
     let info: PlayerInfo = serde_json::from_str(r#"{"online":"away"}"#).expect("player json");
     assert_eq!(info.online, Presence::Unknown);

@@ -34,10 +34,9 @@ impl RenderOnce for Avatar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let p = cx.palette();
         let pixels = (self.size * window.scale_factor()).round().max(8.0) as u32;
-        let uuid = self.uuid.clone();
         let image = self
             .store
-            .update(cx, |store, cx| store.head(&uuid, pixels, cx));
+            .update(cx, |store, cx| store.head(&self.uuid, pixels, cx));
         div()
             .flex_none()
             .size(px(self.size))

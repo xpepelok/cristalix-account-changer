@@ -3,10 +3,11 @@ use std::time::{Duration, Instant};
 
 use ac_api::Theme;
 use gpui::{
-    AnimationExt, AnyElement, App, Context, Entity, FocusHandle, Focusable, FontWeight,
-    InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Pixels, Point, Render,
-    RenderImage, SharedString, StatefulInteractiveElement, Styled, StyledImage, Subscription, Task,
-    Window, deferred, div, img, prelude::FluentBuilder, px, relative,
+    AnimationExt, AnyElement, App, Bounds, Context, Corners, Entity, FocusHandle, Focusable,
+    FontWeight, InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Pixels, Point,
+    Render, RenderImage, SharedString, StatefulInteractiveElement, Styled, StyledImage,
+    Subscription, Task, Window, canvas, deferred, div, img, point, prelude::FluentBuilder, px,
+    relative, size,
 };
 
 use crate::ambient;
@@ -104,46 +105,133 @@ pub enum Overlay {
     Confirm(ConfirmView),
 }
 
+const WAVE_TILE: u32 = 64;
+const WAVE_MARGIN: f32 = 0.01;
+
+struct WaveTile {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    image: Arc<RenderImage>,
+    edge: Option<Arc<RenderImage>>,
+}
+
 struct ThemeWave {
     origin: Point<Pixels>,
     started: Instant,
-    snapshot: crate::platform::window::Snapshot,
-    original: Vec<u8>,
-    shown: Option<Arc<RenderImage>>,
+    width: u32,
+    height: u32,
+    tiles: Vec<WaveTile>,
 }
 
-fn punch(wave: &mut ThemeWave, center: (f32, f32), radius: f32) {
-    let width = wave.snapshot.width as usize;
-    let height = wave.snapshot.height as usize;
-    let (cx, cy) = center;
-    let top = (cy - radius - 1.0).floor().max(0.0) as usize;
-    let bottom = ((cy + radius + 1.0).ceil().max(0.0) as usize).min(height);
-    let outer = radius + 1.0;
-    for y in top..bottom {
-        let dy = y as f32 + 0.5 - cy;
-        let span = outer * outer - dy * dy;
-        if span <= 0.0 {
-            continue;
+enum Coverage {
+    Kept,
+    Edge,
+    Gone,
+}
+
+fn tile_image(width: u32, height: u32, pixels: Vec<u8>) -> Option<Arc<RenderImage>> {
+    let frame = image::RgbaImage::from_raw(width, height, pixels)?;
+    Some(Arc::new(RenderImage::new(smallvec::smallvec![
+        image::Frame::new(frame)
+    ])))
+}
+
+impl WaveTile {
+    fn coverage(&self, (cx, cy): (f32, f32), radius: f32) -> Coverage {
+        let (left, right) = (self.x as f32 + 0.5, (self.x + self.width) as f32 - 0.5);
+        let (top, bottom) = (self.y as f32 + 0.5, (self.y + self.height) as f32 - 0.5);
+        let near = (cx.clamp(left, right) - cx).hypot(cy.clamp(top, bottom) - cy);
+        if near >= radius + 0.5 + WAVE_MARGIN {
+            return Coverage::Kept;
         }
-        let half = span.sqrt();
-        let left = (cx - half).floor().max(0.0) as usize;
-        let right = ((cx + half).ceil().max(0.0) as usize).min(width);
-        for x in left..right {
-            let dx = x as f32 + 0.5 - cx;
-            let keep = ((dx * dx + dy * dy).sqrt() - radius + 0.5).clamp(0.0, 1.0);
-            let index = (y * width + x) * 4;
-            let pixel = &mut wave.snapshot.pixels[index..index + 4];
-            if keep <= 0.0 {
-                pixel.copy_from_slice(&[0, 0, 0, 0]);
-            } else if keep < 1.0 {
-                let source = &wave.original[index..index + 4];
-                for channel in 0..3 {
-                    pixel[channel] = (f32::from(source[channel]) * keep).round() as u8;
+        let far = (cx - left)
+            .abs()
+            .max((right - cx).abs())
+            .hypot((cy - top).abs().max((bottom - cy).abs()));
+        if far <= radius - 0.5 - WAVE_MARGIN {
+            Coverage::Gone
+        } else {
+            Coverage::Edge
+        }
+    }
+
+    fn carve(&self, (cx, cy): (f32, f32), radius: f32) -> Option<Arc<RenderImage>> {
+        let source = self.image.as_bytes(0)?;
+        let mut pixels = source.to_vec();
+        for row in 0..self.height {
+            let dy = (self.y + row) as f32 + 0.5 - cy;
+            for column in 0..self.width {
+                let dx = (self.x + column) as f32 + 0.5 - cx;
+                let keep = ((dx * dx + dy * dy).sqrt() - radius + 0.5).clamp(0.0, 1.0);
+                if keep >= 1.0 {
+                    continue;
                 }
-                pixel[3] = (255.0 * keep).round() as u8;
+                let index = ((row * self.width + column) * 4) as usize;
+                let pixel = &mut pixels[index..index + 4];
+                if keep <= 0.0 {
+                    pixel.fill(0);
+                } else {
+                    for channel in 0..3 {
+                        pixel[channel] = (f32::from(source[index + channel]) * keep).round() as u8;
+                    }
+                    pixel[3] = (255.0 * keep).round() as u8;
+                }
+            }
+        }
+        tile_image(self.width, self.height, pixels)
+    }
+}
+
+impl ThemeWave {
+    fn new(origin: Point<Pixels>, snapshot: crate::platform::window::Snapshot) -> Option<Self> {
+        let (width, height) = (snapshot.width, snapshot.height);
+        let mut tiles = Vec::new();
+        for y in (0..height).step_by(WAVE_TILE as usize) {
+            let rows = WAVE_TILE.min(height - y);
+            for x in (0..width).step_by(WAVE_TILE as usize) {
+                let columns = WAVE_TILE.min(width - x);
+                let stride = (columns * 4) as usize;
+                let mut pixels = Vec::with_capacity(stride * rows as usize);
+                for row in y..y + rows {
+                    let start = ((row * width + x) * 4) as usize;
+                    pixels.extend_from_slice(&snapshot.pixels[start..start + stride]);
+                }
+                tiles.push(WaveTile {
+                    x,
+                    y,
+                    width: columns,
+                    height: rows,
+                    image: tile_image(columns, rows, pixels)?,
+                    edge: None,
+                });
+            }
+        }
+        Some(Self {
+            origin,
+            started: Instant::now(),
+            width,
+            height,
+            tiles,
+        })
+    }
+
+    fn release(self, window: &mut Window) {
+        for tile in self.tiles {
+            window.drop_image(tile.image).ok();
+            if let Some(edge) = tile.edge {
+                window.drop_image(edge).ok();
             }
         }
     }
+}
+
+struct ShownToast {
+    id: u64,
+    text: SharedString,
+    error: bool,
+    hidden: Option<Instant>,
 }
 
 pub struct Shell {
@@ -152,7 +240,7 @@ pub struct Shell {
     pub overlays: Vec<Overlay>,
     pub popup: Option<Popup>,
     closing: Option<(Popup, Instant)>,
-    shown_toast: Option<(crate::state::Toast, Option<Instant>)>,
+    shown_toast: Option<ShownToast>,
     leaving: Vec<(Overlay, Instant)>,
     dismissed: Option<(&'static str, Instant)>,
     pub refreshing: bool,
@@ -161,7 +249,6 @@ pub struct Shell {
     focus: FocusHandle,
     font: SharedString,
     ambient_task: Option<Task<()>>,
-    backdrop_task: Option<Task<()>>,
     theme_wave: Option<ThemeWave>,
     pub(crate) cabinet_login: Option<crate::views::cabinet::CabinetLogin>,
     _subscriptions: Vec<Subscription>,
@@ -212,7 +299,6 @@ impl Shell {
             focus: cx.focus_handle(),
             font,
             ambient_task: None,
-            backdrop_task: None,
             theme_wave: None,
             cabinet_login: None,
             _subscriptions: subscriptions,
@@ -258,7 +344,6 @@ impl Shell {
                 };
                 this.update(cx, |shell, cx| {
                     shell.backdrop.finish(load, image);
-                    shell.animate_backdrop(cx);
                     cx.notify();
                 })
                 .ok();
@@ -324,7 +409,6 @@ impl Shell {
             };
             let playing = this
                 .update(cx, |shell, cx| {
-                    shell.backdrop_task = None;
                     let playing = shell.backdrop.finish_video(load, player);
                     shell.backdrop.set_live(ambient::is_live(cx));
                     cx.notify();
@@ -345,28 +429,6 @@ impl Shell {
             }
         })
         .detach();
-    }
-
-    fn animate_backdrop(&mut self, cx: &mut Context<Self>) {
-        self.backdrop_task = self.backdrop.animated().then(|| {
-            cx.spawn(async move |this, cx| {
-                loop {
-                    let Ok(Some(wait)) = this.update(cx, |shell, _| shell.backdrop.next_change())
-                    else {
-                        break;
-                    };
-                    cx.background_executor().timer(wait).await;
-                    let advanced = this.update(cx, |_, cx| {
-                        if ambient::is_live(cx) {
-                            cx.notify();
-                        }
-                    });
-                    if advanced.is_err() {
-                        break;
-                    }
-                }
-            })
-        });
     }
 
     pub fn reveal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -547,16 +609,11 @@ impl Shell {
         } else {
             Sound::ThemeDark
         });
-        if let Some(previous) = self.theme_wave.take().and_then(|wave| wave.shown) {
-            window.drop_image(previous).ok();
+        if let Some(previous) = self.theme_wave.take() {
+            previous.release(window);
         }
-        self.theme_wave = crate::platform::window::snapshot(window).map(|snapshot| ThemeWave {
-            origin,
-            started: Instant::now(),
-            original: snapshot.pixels.clone(),
-            snapshot,
-            shown: None,
-        });
+        self.theme_wave = crate::platform::window::snapshot(window)
+            .and_then(|snapshot| ThemeWave::new(origin, snapshot));
         crate::theme::install(theme, cx);
         self.store.update(cx, |store, cx| {
             store.settings.theme = theme;
@@ -570,8 +627,8 @@ impl Shell {
         let wave = self.theme_wave.as_mut()?;
         let elapsed = wave.started.elapsed();
         if elapsed >= WAVE {
-            if let Some(shown) = self.theme_wave.take().and_then(|wave| wave.shown) {
-                window.drop_image(shown).ok();
+            if let Some(wave) = self.theme_wave.take() {
+                wave.release(window);
             }
             return None;
         }
@@ -583,26 +640,61 @@ impl Shell {
         let reach = x.max(width - x).hypot(y.max(height - y));
         let progress =
             motion::cubic_bezier(motion::STANDARD, elapsed.as_secs_f32() / WAVE.as_secs_f32());
-        punch(wave, (x * scale, y * scale), reach * progress * scale);
-        let frame = image::RgbaImage::from_raw(
-            wave.snapshot.width,
-            wave.snapshot.height,
-            wave.snapshot.pixels.clone(),
-        )?;
-        let image = Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(
-            frame
-        )]));
-        if let Some(previous) = wave.shown.replace(image.clone()) {
-            window.drop_image(previous).ok();
+        let center = (x * scale, y * scale);
+        let radius = reach * progress * scale;
+        let mut visible = Vec::with_capacity(wave.tiles.len());
+        for tile in &mut wave.tiles {
+            let coverage = tile.coverage(center, radius);
+            let edge = match coverage {
+                Coverage::Edge => tile.carve(center, radius),
+                Coverage::Kept | Coverage::Gone => None,
+            };
+            if let Some(previous) = std::mem::replace(&mut tile.edge, edge) {
+                window.drop_image(previous).ok();
+            }
+            let shown = match coverage {
+                Coverage::Kept => Some(tile.image.clone()),
+                Coverage::Edge => tile.edge.clone(),
+                Coverage::Gone => None,
+            };
+            if let Some(image) = shown {
+                visible.push((tile.x, tile.y, tile.width, tile.height, image));
+            }
         }
+        let (columns, rows) = (wave.width as f32, wave.height as f32);
         Some(
             deferred(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .size_full()
-                    .child(img(image).size_full().object_fit(gpui::ObjectFit::Fill)),
+                canvas(
+                    |_, _, _| {},
+                    move |bounds, (), window, _| {
+                        let scale = window.scale_factor();
+                        let across = f32::from(bounds.size.width) * scale / columns;
+                        let down = f32::from(bounds.size.height) * scale / rows;
+                        for (x, y, width, height, image) in visible {
+                            let left = (x as f32 * across).round();
+                            let top = (y as f32 * down).round();
+                            let right = ((x + width) as f32 * across).round();
+                            let bottom = ((y + height) as f32 * down).round();
+                            let tile = Bounds::new(
+                                point(
+                                    bounds.origin.x + px((left + 0.25) / scale),
+                                    bounds.origin.y + px((top + 0.25) / scale),
+                                ),
+                                size(
+                                    px((right - left - 0.25) / scale),
+                                    px((bottom - top - 0.25) / scale),
+                                ),
+                            );
+                            window
+                                .paint_image(tile, Corners::default(), image, 0, false)
+                                .ok();
+                        }
+                    },
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full(),
             )
             .with_priority(20)
             .into_any_element(),
@@ -854,25 +946,36 @@ impl Shell {
 
     fn render_toast(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let p = cx.palette();
-        let current = self.store.read(cx).toast.clone();
-        let (toast, fade) = match current {
+        let fade = match &self.store.read(cx).toast {
             Some(toast) => {
-                self.shown_toast = Some((toast.clone(), None));
-                (toast, None)
+                if self.shown_toast.as_ref().is_none_or(|shown| {
+                    shown.id != toast.id
+                        || shown.hidden.is_some()
+                        || shown.text.as_ref() != toast.text.as_str()
+                }) {
+                    self.shown_toast = Some(ShownToast {
+                        id: toast.id,
+                        text: toast.text.clone().into(),
+                        error: toast.error,
+                        hidden: None,
+                    });
+                }
+                None
             }
             None => {
-                let (toast, hidden) = self.shown_toast.as_mut()?;
-                let hidden = *hidden.get_or_insert_with(Instant::now);
+                let shown = self.shown_toast.as_mut()?;
+                let hidden = *shown.hidden.get_or_insert_with(Instant::now);
                 let t = hidden.elapsed().as_secs_f32() / TOAST_OUT.as_secs_f32();
                 if t >= 1.0 {
                     self.shown_toast = None;
                     return None;
                 }
                 window.request_animation_frame();
-                (toast.clone(), Some(motion::cubic_bezier(motion::EASE, t)))
+                Some(motion::cubic_bezier(motion::EASE, t))
             }
         };
-        let toast_id = gpui::ElementId::Name(format!("toast-{}", toast.id).into());
+        let toast = self.shown_toast.as_ref()?;
+        let toast_id = gpui::ElementId::NamedInteger("toast".into(), toast.id);
         Some(
             div()
                 .absolute()
@@ -1144,5 +1247,100 @@ impl Render for Shell {
             .children(toast)
             .children(tooltip)
             .children(wave)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::platform::window::Snapshot;
+
+    fn punched(original: &[u8], width: usize, center: (f32, f32), radii: &[f32]) -> Vec<u8> {
+        let mut pixels = original.to_vec();
+        let height = original.len() / 4 / width;
+        let (cx, cy) = center;
+        for &radius in radii {
+            let top = (cy - radius - 1.0).floor().max(0.0) as usize;
+            let bottom = ((cy + radius + 1.0).ceil().max(0.0) as usize).min(height);
+            let outer = radius + 1.0;
+            for y in top..bottom {
+                let dy = y as f32 + 0.5 - cy;
+                let span = outer * outer - dy * dy;
+                if span <= 0.0 {
+                    continue;
+                }
+                let half = span.sqrt();
+                let left = (cx - half).floor().max(0.0) as usize;
+                let right = ((cx + half).ceil().max(0.0) as usize).min(width);
+                for x in left..right {
+                    let dx = x as f32 + 0.5 - cx;
+                    let keep = ((dx * dx + dy * dy).sqrt() - radius + 0.5).clamp(0.0, 1.0);
+                    let index = (y * width + x) * 4;
+                    if keep <= 0.0 {
+                        pixels[index..index + 4].fill(0);
+                    } else if keep < 1.0 {
+                        for channel in 0..3 {
+                            pixels[index + channel] =
+                                (f32::from(original[index + channel]) * keep).round() as u8;
+                        }
+                        pixels[index + 3] = (255.0 * keep).round() as u8;
+                    }
+                }
+            }
+        }
+        pixels
+    }
+
+    fn composed(wave: &ThemeWave, center: (f32, f32), radius: f32) -> Vec<u8> {
+        let width = wave.width as usize;
+        let mut pixels = vec![0u8; width * wave.height as usize * 4];
+        for tile in &wave.tiles {
+            let image = match tile.coverage(center, radius) {
+                Coverage::Kept => tile.image.clone(),
+                Coverage::Edge => tile.carve(center, radius).unwrap(),
+                Coverage::Gone => continue,
+            };
+            let bytes = image.as_bytes(0).unwrap();
+            let stride = tile.width as usize * 4;
+            for row in 0..tile.height as usize {
+                let start = ((tile.y as usize + row) * width + tile.x as usize) * 4;
+                pixels[start..start + stride]
+                    .copy_from_slice(&bytes[row * stride..(row + 1) * stride]);
+            }
+        }
+        pixels
+    }
+
+    #[test]
+    fn tiled_wave_matches_full_frame_punch() {
+        let (width, height) = (203usize, 147usize);
+        let original: Vec<u8> = (0..width * height * 4)
+            .map(|index| {
+                if index % 4 == 3 {
+                    255
+                } else {
+                    (index * 37 % 251) as u8
+                }
+            })
+            .collect();
+        let wave = ThemeWave::new(
+            Point::default(),
+            Snapshot {
+                width: width as u32,
+                height: height as u32,
+                pixels: original.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(wave.tiles.len(), 4 * 3);
+        for center in [(150.25, 20.5), (0.0, 0.0), (101.5, 146.75)] {
+            let radii: Vec<f32> = (0..=40).map(|step| step as f32 * 6.3).collect();
+            for (index, &radius) in radii.iter().enumerate() {
+                assert_eq!(
+                    composed(&wave, center, radius),
+                    punched(&original, width, center, &radii[..=index]),
+                );
+            }
+        }
     }
 }

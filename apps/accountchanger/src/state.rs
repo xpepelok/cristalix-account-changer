@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -103,8 +104,15 @@ impl CabinetView {
 
 impl EventEmitter<StoreEvent> for Store {}
 
-pub fn player_key(name: &str) -> String {
-    name.to_lowercase()
+pub fn player_key(name: &str) -> Cow<'_, str> {
+    if name
+        .bytes()
+        .any(|byte| !byte.is_ascii() || byte.is_ascii_uppercase())
+    {
+        Cow::Owned(name.to_lowercase())
+    } else {
+        Cow::Borrowed(name)
+    }
 }
 
 impl Store {
@@ -400,7 +408,7 @@ impl Store {
             .accounts
             .iter()
             .map(|account| account.name.clone())
-            .filter(|name| !name.is_empty() && !self.players.contains_key(&player_key(name)))
+            .filter(|name| !name.is_empty() && !self.players.contains_key(&*player_key(name)))
             .collect();
         for name in unknown {
             self.ensure_player(&name, cx);
@@ -532,11 +540,9 @@ impl Store {
         if name.is_empty() {
             return None;
         }
-        self.players.get(&player_key(name)).and_then(Option::as_ref)
-    }
-
-    pub fn player_known(&self, name: &str) -> bool {
-        !name.is_empty() && self.players.contains_key(&player_key(name))
+        self.players
+            .get(&*player_key(name))
+            .and_then(Option::as_ref)
     }
 
     pub fn rank(&self, account: &Account) -> Option<Rank> {
@@ -545,10 +551,15 @@ impl Store {
     }
 
     pub fn display_rank(&self, account: &Account) -> Option<Rank> {
-        if !self.player_known(&account.name) {
+        if account.name.is_empty() {
             return None;
         }
-        Some(self.rank(account).unwrap_or_else(Rank::player))
+        let info = self.players.get(&*player_key(&account.name))?;
+        Some(
+            info.as_ref()
+                .and_then(PlayerInfo::primary_rank)
+                .unwrap_or_else(Rank::player),
+        )
     }
 
     pub fn ensure_player(&mut self, name: &str, cx: &mut Context<Self>) {
@@ -556,14 +567,14 @@ impl Store {
             return;
         }
         let key = player_key(name);
-        if self.players.contains_key(&key) || self.pending_players.contains(&key) {
+        if self.players.contains_key(&*key) || self.pending_players.contains(&*key) {
             return;
         }
         self.load_player(name.to_owned(), false, cx);
     }
 
     fn load_player(&mut self, name: String, fresh: bool, cx: &mut Context<Self>) {
-        let key = player_key(&name);
+        let key = player_key(&name).into_owned();
         if !self.pending_players.insert(key.clone()) {
             return;
         }

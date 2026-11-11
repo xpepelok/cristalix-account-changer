@@ -1,11 +1,13 @@
-use chrono::{DateTime, Datelike, Local, TimeZone, Timelike};
+use std::fmt::Write as _;
+
+use chrono::{DateTime, Datelike, Local, TimeZone, Timelike, Utc};
 
 pub fn now_secs() -> i64 {
-    Local::now().timestamp()
+    Utc::now().timestamp()
 }
 
 pub fn now_millis() -> i64 {
-    Local::now().timestamp_millis()
+    Utc::now().timestamp_millis()
 }
 
 pub fn relative_time(ts: i64, now: i64) -> Option<String> {
@@ -42,7 +44,7 @@ pub fn span(millis: i64) -> String {
     if let Some((next_unit, next_size)) = SPAN_UNITS.get(index + 1) {
         let rest = (total - main * size) / next_size;
         if rest > 0 {
-            out.push_str(&format!(" {rest}{next_unit}"));
+            write!(out, " {rest}{next_unit}").ok();
         }
     }
     out

@@ -153,7 +153,7 @@ pub struct Home {
     pub sort: Vec<Sort>,
     pub debug_expired: bool,
     pub scroll: ScrollHandle,
-    pub seen: HashSet<String>,
+    pub seen: bool,
     pub generation: u64,
     pub first_render: bool,
     pub selection: Selection,
@@ -177,7 +177,7 @@ impl Home {
             sort: Vec::new(),
             debug_expired: false,
             scroll: ScrollHandle::new(),
-            seen: HashSet::new(),
+            seen: false,
             generation: 0,
             first_render: true,
             selection: Selection::default(),
@@ -204,7 +204,7 @@ impl Shell {
         self.home.group = id;
         self.home.selection.clear();
         self.home.generation += 1;
-        self.home.seen.clear();
+        self.home.seen = false;
         cx.notify();
     }
 
@@ -327,9 +327,19 @@ impl Shell {
     ) -> impl IntoElement + use<> {
         let p = cx.palette();
         let store = self.store.read(cx);
-        let group = self.active_group(store).cloned();
-        let progress = store.group_launch.clone();
-        let profiles = store.profiles.profiles.clone();
+        let group = self.active_group(store);
+        let title = group.map_or_else(|| "Все аккаунты".to_owned(), |group| group.name.clone());
+        let (launching, paused) = (store.group_launch.active, store.group_launch.paused);
+        let group = group.map(|group| {
+            let profiles = &store.profiles.profiles;
+            let mut options: Vec<(String, String)> =
+                vec![(String::new(), "- без профиля -".to_owned())];
+            if !group.profile.is_empty() && !profiles.contains(&group.profile) {
+                options.push((group.profile.clone(), group.profile.clone()));
+            }
+            options.extend(profiles.iter().map(|name| (name.clone(), name.clone())));
+            (options, group.profile.clone(), group.members.is_empty())
+        });
         let count = self.home.filters.count(&self.home.sort);
         let menu_open = self.popup_shown(&Popup::GroupMenu) == Some(None);
         let menu_shown = self.popup_shown(&Popup::GroupMenu).is_some();
@@ -381,11 +391,7 @@ impl Shell {
                     .overflow_hidden()
                     .text_size(rem(0.9))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(
-                        group
-                            .as_ref()
-                            .map_or_else(|| "Все аккаунты".to_owned(), |g| g.name.clone()),
-                    ),
+                    .child(title),
             )
             .child(icon(Icon::Caret, px(14.0), p.muted).with_transformation(
                 gpui::Transformation::rotate(gpui::Radians(std::f32::consts::PI * caret_turn)),
@@ -396,14 +402,13 @@ impl Shell {
         });
 
         let actions =
-            group.as_ref().map(|group| {
-                let launching = progress.active;
-                let (label, tip) = match (launching, progress.paused) {
+            group.map(|(options, current, no_members)| {
+                let (label, tip) = match (launching, paused) {
                     (false, _) => ("Запустить все", "Запустить все аккаунты группы поочерёдно"),
                     (true, true) => ("Возобновить", "Возобновить запуск аккаунтов"),
                     (true, false) => ("Остановить", "Остановить запуск аккаунтов"),
                 };
-                let empty = group.members.is_empty() || !self.group_has_visible(cx);
+                let empty = no_members || !self.group_has_visible(cx);
                 let mut launch = Button::new("group-launch", label, ButtonStyle::Primary)
                     .min_width(163.0)
                     .height(40.0)
@@ -412,13 +417,6 @@ impl Shell {
                 if !launching {
                     launch = launch.icon(Icon::PlaySolid, 15.0);
                 }
-                let mut options: Vec<(String, String)> =
-                    vec![(String::new(), "- без профиля -".to_owned())];
-                if !group.profile.is_empty() && !profiles.contains(&group.profile) {
-                    options.push((group.profile.clone(), group.profile.clone()));
-                }
-                options.extend(profiles.iter().map(|name| (name.clone(), name.clone())));
-                let current = group.profile.clone();
                 div()
                     .flex()
                     .flex_wrap()
@@ -570,7 +568,18 @@ impl Shell {
         let p = cx.palette();
         let store = self.store.read(cx);
         let selected = self.home.group.clone();
-        let groups: Vec<Group> = store.groups.clone();
+        let groups: Vec<(String, String, bool, usize)> = store
+            .groups
+            .iter()
+            .map(|group| {
+                (
+                    group.id.clone(),
+                    group.name.clone(),
+                    group.pinned,
+                    group.members.len(),
+                )
+            })
+            .collect();
         let viewport = f32::from(window.viewport_size().height);
         let max_height = (viewport - 320.0 - 18.0).clamp(120.0, 340.0);
         let mut menu = menu_surface(p.surface_2, 11.0, 7.0, cx)
@@ -600,39 +609,29 @@ impl Shell {
                 }))
                 .child(div().flex_1().child("Все аккаунты")),
         );
-        for group in groups {
-            let id = group.id.clone();
-            let active = selected.as_deref() == Some(group.id.as_str());
+        for (id, name, pinned, members) in groups {
+            let active = selected.as_deref() == Some(id.as_str());
             menu = menu.child(
-                item(
-                    ElementId::Name(format!("group-{}", group.id).into()),
-                    active,
-                )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    sound::play(Sound::Tap);
-                    this.close_popup(cx);
-                    this.select_group(Some(id.clone()), cx);
-                }))
-                .when(group.pinned, |row| {
-                    row.child(icon(Icon::StarSolid, px(13.0), p.yellow))
-                })
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .overflow_hidden()
-                        .child(group.name.clone()),
-                )
-                .child(
-                    div()
-                        .px(px(8.0))
-                        .py(px(1.0))
-                        .rounded(px(20.0))
-                        .bg(p.count_bg)
-                        .text_size(rem(0.72))
-                        .text_color(p.muted)
-                        .child(group.members.len().to_string()),
-                ),
+                item(ElementId::Name(format!("group-{id}").into()), active)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        sound::play(Sound::Tap);
+                        this.close_popup(cx);
+                        this.select_group(Some(id.clone()), cx);
+                    }))
+                    .when(pinned, |row| {
+                        row.child(icon(Icon::StarSolid, px(13.0), p.yellow))
+                    })
+                    .child(div().flex_1().min_w_0().overflow_hidden().child(name))
+                    .child(
+                        div()
+                            .px(px(8.0))
+                            .py(px(1.0))
+                            .rounded(px(20.0))
+                            .bg(p.count_bg)
+                            .text_size(rem(0.72))
+                            .text_color(p.muted)
+                            .child(members.to_string()),
+                    ),
             );
         }
         menu = menu
@@ -698,7 +697,10 @@ impl Shell {
                 .text_size(rem(0.66))
                 .font_weight(FontWeight::BOLD)
                 .text_color(p.faint)
-                .child(crate::ui::spaced(&text.to_uppercase(), 0.5))
+                .child(crate::ui::spaced_chars(
+                    text.chars().flat_map(char::to_uppercase),
+                    0.5,
+                ))
         };
         let row = |id: ElementId| {
             div()
@@ -880,7 +882,17 @@ impl Shell {
     fn render_grid(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = cx.palette();
         let gutter = self.gutter(window);
-        let store = self.store.read(cx);
+        self.prune_selection(cx);
+        let max_offset = f32::from(self.home.scroll.max_offset().height);
+        let overflows = max_offset > 0.5;
+        let width = f32::from(window.viewport_size().width)
+            - gutter * 2.0
+            - if overflows { SCROLLBAR_WIDTH } else { 0.0 };
+        let cols = columns(width);
+        let card_width = (width - GRID_GAP * (cols as f32 - 1.0)) / cols as f32;
+        let generation = self.home.generation;
+        let view: &Context<Self> = cx;
+        let store = self.store.read(view);
         let group = self.active_group(store);
         let has_group = group.is_some();
         let no_accounts = store.accounts_loaded && store.accounts.is_empty();
@@ -893,34 +905,31 @@ impl Shell {
             self.home.debug_expired,
             |account| store.rank(account),
         );
-        let uuids: Vec<String> = list.iter().map(|a| a.uuid.clone()).collect();
-        self.prune_selection(cx);
-        self.home.selection.order = uuids.clone();
+        let order = &mut self.home.selection.order;
+        if order.len() != list.len()
+            || order
+                .iter()
+                .zip(&list)
+                .any(|(uuid, account)| *uuid != account.uuid)
+        {
+            *order = list.iter().map(|account| account.uuid.clone()).collect();
+        }
         self.home.selection.cards.borrow_mut().clear();
         let cards = self.home.selection.cards.clone();
-        let accounts: Vec<Account> = list.into_iter().cloned().collect();
-        let max_offset = f32::from(self.home.scroll.max_offset().height);
-        let overflows = max_offset > 0.5;
-        let width = f32::from(window.viewport_size().width)
-            - gutter * 2.0
-            - if overflows { SCROLLBAR_WIDTH } else { 0.0 };
-        let cols = columns(width);
-        let card_width = (width - GRID_GAP * (cols as f32 - 1.0)) / cols as f32;
-        let first = self.home.first_render && !accounts.is_empty();
-        let generation = self.home.generation;
-        let replay = generation > 0 && self.home.seen.is_empty() && !first;
-        self.home.seen = uuids.iter().cloned().collect();
-        if !accounts.is_empty() {
+        let first = self.home.first_render && !list.is_empty();
+        let replay = generation > 0 && !self.home.seen && !first;
+        self.home.seen = !list.is_empty();
+        if !list.is_empty() {
             self.home.first_render = false;
         }
 
         let mut rows: Vec<AnyElement> = Vec::new();
-        for (row_index, chunk) in accounts.chunks(cols).enumerate() {
+        for (row_index, chunk) in list.chunks(cols).enumerate() {
             let mut row = div().flex().gap(px(GRID_GAP)).w_full();
             for (col, account) in chunk.iter().enumerate() {
                 let index = row_index * cols + col;
                 let card = self
-                    .render_card(account, card_width, window, cx)
+                    .render_card(account, card_width, window, view)
                     .into_any_element();
                 let delay = if first {
                     Duration::from_millis((index as u64 * 24).min(260))
@@ -1171,7 +1180,8 @@ impl Shell {
     pub(crate) fn render_fabs(&mut self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let p = cx.palette();
         let store = self.store.read(cx);
-        let import = store.import.clone();
+        let (loading, import_done, import_total) =
+            (store.import.running, store.import.done, store.import.total);
         let can_import = store.caps.credential_import;
         let queue_len = store.queue.len();
         let peak = store.queue_peak.max(queue_len).max(1);
@@ -1228,7 +1238,6 @@ impl Shell {
 
         let fab_key = Key::of("cred-btn");
         let fab_hover = motion::value(fab_key, cx);
-        let loading = import.running;
         let fab_tone = if loading { 1.0 } else { fab_hover };
         let import_fab = can_import.then(|| {
             with_tooltip(
@@ -1272,7 +1281,7 @@ impl Shell {
                             ))
                         }
                     })
-                    .when(loading && import.total > 0, |fab| {
+                    .when(loading && import_total > 0, |fab| {
                         fab.child(
                             div()
                                 .absolute()
@@ -1292,7 +1301,7 @@ impl Shell {
                                 .justify_center()
                                 .whitespace_nowrap()
                                 .shadow(shadow(0.0, 2.0, 6.0, 0.0, rgba(0x000000, 0.3)))
-                                .child(format!("{}/{}", import.done, import.total)),
+                                .child(format!("{import_done}/{import_total}")),
                         )
                     }),
                 fab_key,

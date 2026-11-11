@@ -112,10 +112,11 @@ impl Motion {
     pub fn drive(&mut self, key: Key, on: bool, duration: Duration, curve: [f32; 4]) {
         let now = Instant::now();
         let to = if on { 1.0 } else { 0.0 };
-        let from = self.tracks.get(&key).map_or(0.0, |track| track.value(now));
-        if self.tracks.get(&key).is_some_and(|track| track.to == to) {
+        let current = self.tracks.get(&key);
+        if current.is_some_and(|track| track.to == to) {
             return;
         }
+        let from = current.map_or(0.0, |track| track.value(now));
         if !on && from <= 0.0 {
             self.tracks.remove(&key);
             return;
