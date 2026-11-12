@@ -238,10 +238,6 @@ impl PlayerService {
         }
     }
 
-    pub fn export(&self) -> Vec<CacheEntry> {
-        collect_entries(&self.cache.lock())
-    }
-
     pub fn take_dirty(&self) -> Option<Vec<CacheEntry>> {
         let mut cache = self.cache.lock();
         if cache.dirty.is_empty() {
@@ -355,20 +351,6 @@ fn cache_key(name: &str) -> String {
     name.to_lowercase()
 }
 
-fn collect_entries(cache: &Cache) -> Vec<CacheEntry> {
-    cache
-        .slots
-        .iter()
-        .filter_map(|(key, slot)| {
-            slot.info.as_ref().map(|info| CacheEntry {
-                key: key.clone(),
-                info: PlayerInfo::clone(info),
-                fetched_at: slot.fetched_at,
-            })
-        })
-        .collect()
-}
-
 fn retry_after(header: Option<&str>) -> Duration {
     header
         .and_then(|value| value.trim().parse::<i64>().ok())
@@ -439,7 +421,6 @@ mod tests {
         assert_eq!(service.cached_staff("fresh").as_deref(), Some("PLAYER"));
         assert!(service.cached("old").is_none());
         assert!(service.take_dirty().is_none());
-        assert_eq!(service.export().len(), 1);
     }
 
     #[tokio::test]

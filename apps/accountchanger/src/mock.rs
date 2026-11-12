@@ -1027,6 +1027,10 @@ impl Backend for MockBackend {
         self.with(|_| Ok(()))
     }
 
+    fn emojis(&self, _codes: Vec<u32>) -> ApiFuture<ac_api::EmojiSet> {
+        self.with(|_| Ok(ac_api::EmojiSet::default()))
+    }
+
     fn cabinet_sessions(&self) -> ApiFuture<Vec<String>> {
         self.with(|_| Ok(Vec::new()))
     }

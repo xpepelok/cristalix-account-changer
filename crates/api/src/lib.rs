@@ -1,6 +1,7 @@
 mod account;
 mod backend;
 mod cabinet;
+mod emoji;
 mod error;
 mod event;
 mod groups;
@@ -17,6 +18,7 @@ pub use account::{
 };
 pub use backend::{ApiFuture, Backend, EventStream};
 pub use cabinet::{CabinetStatus, PunishmentKind, Segment, Violation};
+pub use emoji::{EmojiAtlas, EmojiSet, emoji_codes, is_emoji};
 pub use error::{ApiError, ApiResult, msg};
 pub use event::BackendEvent;
 pub use groups::{GROUP_NAME_MAX_CHARS, Group, GroupLaunchProgress, GroupSkip};

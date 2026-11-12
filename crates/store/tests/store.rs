@@ -46,7 +46,6 @@ fn claims(uuid: &str, exp: i64) -> Claims {
     Claims {
         uuid: uuid.to_owned(),
         exp,
-        ..Claims::default()
     }
 }
 

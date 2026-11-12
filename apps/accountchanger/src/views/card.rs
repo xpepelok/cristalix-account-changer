@@ -45,7 +45,7 @@ impl Shell {
         let body = width - 144.0;
         let mut title_budget = body - 29.0;
         if let Some(rank) = &rank {
-            title_budget -= fit::chip_width(&rank.label, false, window) + 7.0;
+            title_budget -= fit::chip_width(&crate::emoji::label(rank, cx), false, window) + 7.0;
         }
         if token == TokenState::Expired {
             title_budget -= 21.0;
@@ -237,7 +237,7 @@ impl Shell {
             .gap(px(7.0))
             .min_w_0()
             .child(pin)
-            .children(rank.map(|rank| Chip::new(rank.label, rank.color)))
+            .children(rank.map(Chip::rank))
             .child(
                 div()
                     .flex_1()
@@ -479,8 +479,11 @@ pub(crate) fn punish_lines(
             violation
                 .issued_by_display
                 .iter()
-                .map(|segment| segment.text.as_str())
-                .collect(),
+                .flat_map(|segment| segment.text.chars())
+                .filter(|ch| !ac_api::is_emoji(*ch))
+                .collect::<String>()
+                .trim()
+                .to_owned(),
         ));
     } else if !violation.issued_by_name.is_empty() {
         lines.push((ISSUER, violation.issued_by_name.clone()));

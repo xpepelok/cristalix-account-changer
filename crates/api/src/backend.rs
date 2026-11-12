@@ -5,9 +5,9 @@ use futures::stream::BoxStream;
 
 use crate::{
     Account, ApiResult, BackendEvent, CabinetStatus, Caps, Clients, Credentials, CustomLauncher,
-    Group, GroupLaunchProgress, ImportProgress, LaunchSettings, LauncherKind, LogStats, LogSummary,
-    LogView, OnlineStats, PlayerInfo, ProfileFiles, Profiles, QueueEntry, SavedProfile, Settings,
-    Status, TextureKind, Theme, UpdateInfo, UpdateProgress, VideoBackground,
+    EmojiSet, Group, GroupLaunchProgress, ImportProgress, LaunchSettings, LauncherKind, LogStats,
+    LogSummary, LogView, OnlineStats, PlayerInfo, ProfileFiles, Profiles, QueueEntry, SavedProfile,
+    Settings, Status, TextureKind, Theme, UpdateInfo, UpdateProgress, VideoBackground,
 };
 
 pub type ApiFuture<T> = BoxFuture<'static, ApiResult<T>>;
@@ -80,6 +80,7 @@ pub trait Backend: Send + Sync + 'static {
     fn account_password(&self, uuid: String) -> ApiFuture<Option<String>>;
     fn set_account_password(&self, uuid: String, password: String) -> ApiFuture<()>;
     fn cabinet_sessions(&self) -> ApiFuture<Vec<String>>;
+    fn emojis(&self, codes: Vec<u32>) -> ApiFuture<EmojiSet>;
 
     fn online_stats(&self) -> ApiFuture<OnlineStats>;
     fn logs(&self) -> ApiFuture<Vec<LogSummary>>;

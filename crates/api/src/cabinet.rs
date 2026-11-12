@@ -30,7 +30,6 @@ pub struct Violation {
     pub issued_by_name: String,
     #[serde(default)]
     pub issued_by_display: Vec<Segment>,
-    pub remaining: i64,
     pub permanent: bool,
     pub expires_at: i64,
     pub price: i64,

@@ -63,6 +63,7 @@ impl Updater {
         Self::new(std::env::current_exe()?)
     }
 
+    #[cfg(test)]
     pub fn with_release_api(mut self, url: impl Into<String>) -> Self {
         self.release_api = url.into();
         self

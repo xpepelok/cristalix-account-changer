@@ -44,6 +44,7 @@ fn ranks_follow_staff_then_donate() {
         staff.primary_rank(),
         Some(Rank {
             label: "DEV".into(),
+            name: "DEV".into(),
             color: "#3b82e8".into()
         })
     );
@@ -77,6 +78,15 @@ fn donate_rank_uses_game_prefix() {
     };
     let labels: Vec<String> = curator.ranks().into_iter().map(|rank| rank.label).collect();
     assert_eq!(labels, ["Cur", "PREMIUM+"]);
+    let custom = PlayerInfo {
+        staff: "PLAYER".into(),
+        donate: "paradox".into(),
+        ..PlayerInfo::default()
+    };
+    assert_eq!(
+        custom.primary_rank().map(|rank| rank.label),
+        Some("Paradox".into())
+    );
 }
 
 #[test]

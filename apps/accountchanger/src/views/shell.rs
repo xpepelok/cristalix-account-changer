@@ -3,9 +3,9 @@ use std::time::{Duration, Instant};
 
 use ac_api::Theme;
 use gpui::{
-    AnimationExt, AnyElement, App, Bounds, Context, Corners, Entity, FocusHandle, Focusable,
-    FontWeight, InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Pixels, Point,
-    Render, RenderImage, SharedString, StatefulInteractiveElement, Styled, StyledImage,
+    AnimationExt, AnyElement, App, AppContext, Bounds, Context, Corners, Entity, FocusHandle,
+    Focusable, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Pixels,
+    Point, Render, RenderImage, SharedString, StatefulInteractiveElement, Styled, StyledImage,
     Subscription, Task, Window, canvas, deferred, div, img, point, prelude::FluentBuilder, px,
     relative, size,
 };
@@ -249,6 +249,8 @@ pub struct Shell {
     focus: FocusHandle,
     font: SharedString,
     ambient_task: Option<Task<()>>,
+    pub(crate) grid: Entity<crate::views::home::GridView>,
+    pulse: Entity<crate::views::home::Pulse>,
     theme_wave: Option<ThemeWave>,
     pub(crate) cabinet_login: Option<crate::views::cabinet::CabinetLogin>,
     _subscriptions: Vec<Subscription>,
@@ -283,7 +285,13 @@ impl Shell {
         subscriptions.push(cx.observe_window_activation(window, |shell, window, cx| {
             shell.update_ambient(window, cx);
         }));
+        subscriptions.push(cx.observe_self(|shell, cx| {
+            shell.grid.update(cx, |_, cx| cx.notify());
+        }));
         let home = Home::new(window, cx);
+        let weak = cx.weak_entity();
+        let grid = cx.new(|_| crate::views::home::GridView { shell: weak });
+        let pulse = cx.new(|_| crate::views::home::Pulse);
         Self {
             store,
             home,
@@ -299,6 +307,8 @@ impl Shell {
             focus: cx.focus_handle(),
             font,
             ambient_task: None,
+            grid,
+            pulse,
             theme_wave: None,
             cabinet_login: None,
             _subscriptions: subscriptions,
@@ -311,9 +321,20 @@ impl Shell {
         self.backdrop.set_live(live);
         if live && self.ambient_task.is_none() {
             self.ambient_task = Some(cx.spawn(async move |this, cx| {
+                let mut clock = Instant::now();
                 loop {
                     cx.background_executor().timer(ambient::FRAME).await;
-                    if this.update(cx, |_, cx| cx.notify()).is_err() {
+                    let second = clock.elapsed() >= ambient::CLOCK;
+                    if second {
+                        clock = Instant::now();
+                    }
+                    let ticked = this.update(cx, |shell, cx| {
+                        shell.pulse.update(cx, |_, cx| cx.notify());
+                        if second {
+                            shell.grid.update(cx, |_, cx| cx.notify());
+                        }
+                    });
+                    if ticked.is_err() {
                         break;
                     }
                 }
@@ -1238,6 +1259,7 @@ impl Render for Shell {
                         ),
                 )
             })
+            .child(self.pulse.clone())
             .child(titlebar)
             .child(home)
             .child(fabs)

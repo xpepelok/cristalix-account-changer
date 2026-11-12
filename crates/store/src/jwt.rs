@@ -7,10 +7,6 @@ pub struct Claims {
     #[serde(default)]
     pub uuid: String,
     #[serde(default)]
-    pub purpose: String,
-    #[serde(default)]
-    pub iat: i64,
-    #[serde(default)]
     pub exp: i64,
 }
 
@@ -68,7 +64,6 @@ mod tests {
         let claims = parse(&token(r#"{"uuid":"abc","exp":42,"purpose":"auth"}"#)).unwrap();
         assert_eq!(claims.uuid, "abc");
         assert_eq!(claims.exp, 42);
-        assert_eq!(claims.purpose, "auth");
     }
 
     #[test]

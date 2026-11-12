@@ -7,7 +7,6 @@ pub struct Prefill {
     pub password: String,
 }
 
-#[cfg_attr(not(windows), expect(dead_code))]
 pub struct Signed {
     pub session: String,
     pub login: String,

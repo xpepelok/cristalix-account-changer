@@ -39,7 +39,6 @@ impl From<String> for ApiError {
 pub type ApiResult<T> = Result<T, ApiError>;
 
 pub mod msg {
-    pub const BAD_REQUEST: &str = "bad request";
     pub const GENERIC: &str = "Ошибка";
     pub const NO_TOKEN: &str = "нет сохранённого токена для этого аккаунта";
     pub const NO_SAVED_TOKEN: &str = "нет сохранённого токена";
@@ -73,7 +72,6 @@ pub mod msg {
     pub const LOGIN_FORM_MISSING: &str = "окно входа не найдено (форма авторизации не появилась)";
     pub const LAUNCHER_FOCUS_ADMIN: &str = "не удалось вывести окно лаунчера на передний план — возможно, он запущен от имени администратора. Запусти AccountChanger тоже от администратора и повтори.";
     pub const LAUNCHER_INPUT_ADMIN: &str = "не удалось ввести данные — похоже, лаунчер запущен от имени администратора, а AccountChanger нет. Запусти AccountChanger тоже от администратора и повтори.";
-    pub const LAUNCHER_FOCUS_FAILED: &str = "не удалось сфокусироваться на окне лаунчера";
     pub const CREDENTIALS_INPUT_FAILED: &str = "ошибка ввода логина/пароля";
     pub const LOGIN_TIMEOUT: &str =
         "вход не удался или превышено время ожидания (проверь логин/пароль, возможна капча/2FA)";
@@ -94,10 +92,6 @@ pub mod msg {
 
     pub fn launcher_start_failed(cause: &str) -> String {
         format!("не удалось запустить лаунчер: {cause}")
-    }
-
-    pub fn update_download_failed(status: u16) -> String {
-        format!("не удалось скачать обновление (код {status})")
     }
 
     pub fn import_nothing(skipped: usize, duplicates: usize) -> String {

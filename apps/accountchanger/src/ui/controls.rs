@@ -13,6 +13,8 @@ use crate::motion::{self, EASE_OUT, Key, cubic_bezier};
 use crate::sound::{self, Sound};
 use crate::theme::{Palette, ThemeExt, alpha, mix, parse_hex, rem, rgba, shadow};
 use crate::ui::spaced_chars;
+use crate::ui::text::spaced_icons;
+use ac_api::Rank;
 
 type ToggleHandler = Rc<dyn Fn(&bool, &mut Window, &mut App)>;
 type SelectHandler = Rc<dyn Fn(&usize, &mut Window, &mut App)>;
@@ -22,18 +24,20 @@ pub fn chip_colors(color: &str, p: &Palette) -> (Hsla, Hsla) {
     (tone, alpha(tone, 0.16))
 }
 
+pub fn chip_icon(compact: bool) -> f32 {
+    if compact { 11.0 } else { 12.0 }
+}
+
 #[derive(IntoElement)]
 pub struct Chip {
-    label: SharedString,
-    color: SharedString,
+    rank: Rank,
     compact: bool,
 }
 
 impl Chip {
-    pub fn new(label: impl Into<SharedString>, color: impl Into<SharedString>) -> Self {
+    pub fn rank(rank: Rank) -> Self {
         Self {
-            label: label.into(),
-            color: color.into(),
+            rank,
             compact: false,
         }
     }
@@ -45,14 +49,23 @@ impl Chip {
 }
 
 impl RenderOnce for Chip {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let p = cx.palette();
-        let (fg, bg) = chip_colors(&self.color, &p);
+        let (fg, bg) = chip_colors(&self.rank.color, &p);
         let (size, pad_x, pad_y) = if self.compact {
             (0.55, 5.0, 1.0)
         } else {
             (0.6, 7.0, 2.0)
         };
+        let label = spaced_icons(
+            crate::emoji::label(&self.rank, cx)
+                .chars()
+                .flat_map(char::to_uppercase),
+            0.4,
+            chip_icon(self.compact),
+            window,
+            cx,
+        );
         div()
             .flex_none()
             .flex()
@@ -64,10 +77,7 @@ impl RenderOnce for Chip {
             .text_color(fg)
             .text_size(rem(size))
             .font_weight(FontWeight::EXTRA_BOLD)
-            .child(spaced_chars(
-                self.label.chars().flat_map(char::to_uppercase),
-                0.4,
-            ))
+            .child(label)
     }
 }
 

@@ -40,6 +40,7 @@ pub struct PlayerInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Rank {
     pub label: String,
+    pub name: String,
     pub color: String,
 }
 
@@ -47,6 +48,7 @@ impl Rank {
     pub fn player() -> Self {
         Self {
             label: PLAYER_RANK_LABEL.to_owned(),
+            name: PLAYER_RANK_LABEL.to_owned(),
             color: PLAYER_RANK_COLOR.to_owned(),
         }
     }
@@ -64,6 +66,7 @@ impl PlayerInfo {
     fn staff_rank(&self) -> Option<Rank> {
         (!self.staff.is_empty() && self.staff != PLAYER_RANK_LABEL).then(|| Rank {
             label: first_non_empty([self.label.as_str()], &self.staff),
+            name: self.staff.clone(),
             color: first_non_empty([self.color.as_str()], PLAYER_RANK_COLOR),
         })
     }
@@ -72,13 +75,26 @@ impl PlayerInfo {
         self.staff.is_empty() || self.staff == PLAYER_RANK_LABEL
     }
 
+    fn donate_label(&self) -> String {
+        let label = self.donate.replace("_PLUS", "+").replace('_', " ");
+        if label.chars().any(char::is_uppercase) {
+            return label;
+        }
+        let mut chars = label.chars();
+        chars
+            .next()
+            .map(|first| first.to_uppercase().chain(chars).collect())
+            .unwrap_or_default()
+    }
+
     fn donate_rank(&self) -> Option<Rank> {
         if self.donate.is_empty() || self.donate == "NO" {
             return None;
         }
         Some(if self.staffless() {
             Rank {
-                label: first_non_empty([self.label.as_str()], &self.donate),
+                label: first_non_empty([self.label.as_str()], &self.donate_label()),
+                name: self.donate_label(),
                 color: first_non_empty(
                     [self.color.as_str(), self.donate_color.as_str()],
                     DONATE_RANK_COLOR,
@@ -86,7 +102,8 @@ impl PlayerInfo {
             }
         } else {
             Rank {
-                label: self.donate.replace("_PLUS", "+").replace('_', " "),
+                label: self.donate_label(),
+                name: self.donate_label(),
                 color: first_non_empty([self.donate_color.as_str()], DONATE_RANK_COLOR),
             }
         })

@@ -166,7 +166,7 @@ impl LogsView {
                             }),
                     )
                     .child(Avatar::new(&store, summary.uuid.clone(), 22.0, 5.0))
-                    .children(rank.map(|rank| Chip::new(rank.label, rank.color).compact()))
+                    .children(rank.map(|rank| Chip::rank(rank).compact()))
                     .child(
                         div()
                             .flex_1()

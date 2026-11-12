@@ -1,5 +1,5 @@
-use std::collections::{BTreeSet, HashSet};
-use std::time::Duration;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 use ac_api::{Account, Group, Rank};
 use gpui::{
@@ -26,6 +26,10 @@ use crate::views::shell::{Popup, Shell};
 pub const CARD_MIN_WIDTH: f32 = 350.0;
 pub const GRID_GAP: f32 = 12.0;
 const SCROLLBAR_WIDTH: f32 = 8.0;
+const FILTER_ICON: f32 = 13.0;
+const ROW_HEIGHT: f32 = 76.0;
+const GRID_TOP: f32 = 8.0;
+const ENTER_HOLD: Duration = Duration::from_millis(700);
 const HEARTBEAT: Duration = Duration::from_millis(1150);
 const TELEGRAM_URL: &str = "https://t.me/xpplkn";
 const AUTHOR_URL: &str = "https://top.cristalix.gg/profile/Pepel_ok";
@@ -157,6 +161,29 @@ pub struct Home {
     pub generation: u64,
     pub first_render: bool,
     pub selection: Selection,
+    entered: HashMap<String, Instant>,
+    entered_generation: Option<u64>,
+    row_height: f32,
+}
+
+pub struct GridView {
+    pub shell: gpui::WeakEntity<Shell>,
+}
+
+impl gpui::Render for GridView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.shell
+            .update(cx, |shell, cx| shell.render_grid(window, cx))
+            .unwrap_or_else(|_| div().into_any_element())
+    }
+}
+
+pub struct Pulse;
+
+impl gpui::Render for Pulse {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div().absolute().size_0()
+    }
 }
 
 impl Home {
@@ -181,6 +208,9 @@ impl Home {
             generation: 0,
             first_render: true,
             selection: Selection::default(),
+            entered: HashMap::new(),
+            entered_generation: None,
+            row_height: ROW_HEIGHT,
         }
     }
 }
@@ -305,7 +335,14 @@ impl Shell {
             .children(search_box);
 
         let group_bar = self.render_group_bar(window, cx);
-        let grid = self.render_grid(window, cx);
+        let grid = gpui::AnyView::from(self.grid.clone()).cached(
+            gpui::StyleRefinement::default()
+                .relative()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h_0(),
+        );
 
         div()
             .flex()
@@ -746,12 +783,9 @@ impl Shell {
                     cx.notify();
                 }))
                 .child(Checkbox::new(on).color(color))
-                .child(
-                    div()
-                        .flex_1()
-                        .text_color(color.unwrap_or(p.text))
-                        .child(rank.label.clone()),
-                ),
+                .child(div().flex_1().text_color(color.unwrap_or(p.text)).child(
+                    crate::emoji::rich(&crate::emoji::label(&rank, cx), FILTER_ICON, window, cx),
+                )),
             );
         }
         panel = panel
@@ -879,7 +913,11 @@ impl Shell {
         .with_priority(1)
     }
 
-    fn render_grid(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_grid(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let p = cx.palette();
         let gutter = self.gutter(window);
         self.prune_selection(cx);
@@ -905,15 +943,50 @@ impl Shell {
             self.home.debug_expired,
             |account| store.rank(account),
         );
+        let now = Instant::now();
         let order = &mut self.home.selection.order;
-        if order.len() != list.len()
+        let reordered = order.len() != list.len()
             || order
                 .iter()
                 .zip(&list)
-                .any(|(uuid, account)| *uuid != account.uuid)
-        {
+                .any(|(uuid, account)| *uuid != account.uuid);
+        let entered = &mut self.home.entered;
+        entered.retain(|_, at| now.duration_since(*at) < ENTER_HOLD);
+        if self.home.entered_generation != Some(generation) {
+            self.home.entered_generation = Some(generation);
+            entered.clear();
+            entered.extend(list.iter().map(|account| (account.uuid.clone(), now)));
+        } else if reordered {
+            let known: HashSet<&str> = order.iter().map(String::as_str).collect();
+            for account in &list {
+                if !known.contains(account.uuid.as_str()) {
+                    entered.insert(account.uuid.clone(), now);
+                }
+            }
+        }
+        if reordered {
             *order = list.iter().map(|account| account.uuid.clone()).collect();
         }
+        if let Some(height) = self
+            .home
+            .selection
+            .cards
+            .borrow()
+            .values()
+            .map(|bounds| f32::from(bounds.size.height))
+            .reduce(f32::max)
+        {
+            self.home.row_height = height;
+        }
+        let row_height = self.home.row_height;
+        let view_top = -f32::from(self.home.scroll.offset().y);
+        let view_height = f32::from(self.home.scroll.bounds().size.height);
+        let margin = row_height * 0.5;
+        let on_screen = |row_index: usize| {
+            let top = GRID_TOP + row_index as f32 * (row_height + GRID_GAP);
+            view_height <= 0.0
+                || (top + row_height >= view_top - margin && top <= view_top + view_height + margin)
+        };
         self.home.selection.cards.borrow_mut().clear();
         let cards = self.home.selection.cards.clone();
         let first = self.home.first_render && !list.is_empty();
@@ -926,6 +999,22 @@ impl Shell {
         let mut rows: Vec<AnyElement> = Vec::new();
         for (row_index, chunk) in list.chunks(cols).enumerate() {
             let mut row = div().flex().gap(px(GRID_GAP)).w_full();
+            if !on_screen(row_index) {
+                for account in chunk {
+                    row = row.child(div().relative().flex_1().min_w_0().h(px(row_height)).child(
+                        card_probe(
+                            cards.clone(),
+                            self.home.scroll.clone(),
+                            account.uuid.clone(),
+                        ),
+                    ));
+                }
+                for _ in chunk.len()..cols {
+                    row = row.child(div().flex_1().min_w_0());
+                }
+                rows.push(row.into_any_element());
+                continue;
+            }
             for (col, account) in chunk.iter().enumerate() {
                 let index = row_index * cols + col;
                 let card = self
@@ -938,22 +1027,21 @@ impl Shell {
                 } else {
                     Duration::ZERO
                 };
-                let cell = enter(
-                    div()
-                        .relative()
-                        .flex_1()
-                        .min_w_0()
-                        .child(card)
-                        .child(card_probe(
-                            cards.clone(),
-                            self.home.scroll.clone(),
-                            account.uuid.clone(),
-                        )),
-                    &account.uuid,
-                    generation,
-                    delay,
-                );
-                row = row.child(cell);
+                let cell = div()
+                    .relative()
+                    .flex_1()
+                    .min_w_0()
+                    .child(card)
+                    .child(card_probe(
+                        cards.clone(),
+                        self.home.scroll.clone(),
+                        account.uuid.clone(),
+                    ));
+                row = if self.home.entered.contains_key(&account.uuid) {
+                    row.child(enter(cell, &account.uuid, generation, delay))
+                } else {
+                    row.child(cell)
+                };
             }
             for _ in chunk.len()..cols {
                 row = row.child(div().flex_1().min_w_0());
@@ -1043,8 +1131,7 @@ impl Shell {
             .relative()
             .flex()
             .flex_col()
-            .flex_1()
-            .min_h_0()
+            .size_full()
             .child(
                 div()
                     .id("acc-scroll")
@@ -1412,9 +1499,7 @@ impl Shell {
                         22.0,
                         5.0,
                     ))
-                    .children(
-                        rank.map(|rank| crate::ui::Chip::new(rank.label, rank.color).compact()),
-                    )
+                    .children(rank.map(|rank| crate::ui::Chip::rank(rank).compact()))
                     .child(
                         div()
                             .flex_1()
@@ -1663,6 +1748,7 @@ mod tests {
         let (no_rank, _) = visible(&accounts, None, &filters, &[], "", false, |a| {
             (a.uuid == "1").then(|| Rank {
                 label: "VIP".into(),
+                name: "VIP".into(),
                 color: "#fff".into(),
             })
         });

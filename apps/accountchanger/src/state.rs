@@ -64,6 +64,7 @@ pub struct Store {
     launching: HashSet<String>,
     pub skins: Skins,
     pub cabinet: HashMap<String, CabinetView>,
+    emoji_requested: HashSet<u32>,
     pub toast: Option<Toast>,
     toast_seq: u64,
     _tasks: Vec<Task<()>>,
@@ -140,6 +141,7 @@ impl Store {
             launching: HashSet::new(),
             skins: Skins::default(),
             cabinet: HashMap::new(),
+            emoji_requested: HashSet::new(),
             toast: None,
             toast_seq: 0,
             _tasks: Vec::new(),
@@ -368,6 +370,7 @@ impl Store {
                 if let Some((text, error)) = notice {
                     store.toast(text, error, cx);
                 }
+                store.sync_emojis(cx);
                 cx.notify();
             })
             .ok();
@@ -586,6 +589,58 @@ impl Store {
         self.load_player(name.to_owned(), false, cx);
     }
 
+    fn sync_emojis(&mut self, cx: &mut Context<Self>) {
+        let labels = self
+            .players
+            .values()
+            .flatten()
+            .map(|info| info.label.as_str());
+        let issuers = self
+            .cabinet
+            .values()
+            .filter_map(|view| view.status.as_ref())
+            .flat_map(|status| [status.ban.as_ref(), status.mute.as_ref()])
+            .flatten()
+            .flat_map(|violation| violation.issued_by_display.iter())
+            .map(|segment| segment.text.as_str());
+        let mut codes: Vec<u32> = labels
+            .chain(issuers)
+            .flat_map(ac_api::emoji_codes)
+            .filter(|code| !self.emoji_requested.contains(code))
+            .collect();
+        codes.sort_unstable();
+        codes.dedup();
+        if codes.is_empty() {
+            return;
+        }
+        self.emoji_requested.extend(codes.iter().copied());
+        let future = self.backend.emojis(codes.clone());
+        cx.spawn(async move |this, cx| {
+            let Ok(set) = future.await else {
+                this.update(cx, |store, _| {
+                    for code in &codes {
+                        store.emoji_requested.remove(code);
+                    }
+                })
+                .ok();
+                return;
+            };
+            let images = cx
+                .background_executor()
+                .spawn(async move { crate::emoji::decode(set, &codes) })
+                .await;
+            if images.is_empty() {
+                return;
+            }
+            this.update(cx, |_, cx| {
+                crate::emoji::install(images, cx);
+                cx.refresh_windows();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     fn load_player(&mut self, name: String, fresh: bool, cx: &mut Context<Self>) {
         let key = player_key(&name).into_owned();
         if !self.pending_players.insert(key.clone()) {
@@ -599,6 +654,7 @@ impl Store {
                 match result {
                     Ok(Some(info)) if !info.name.is_empty() => {
                         store.players.insert(key, Some(info));
+                        store.sync_emojis(cx);
                     }
                     _ => {
                         store.players.entry(key).or_insert(None);

@@ -44,11 +44,13 @@ pub fn fits(text: &str, size: f32, weight: FontWeight, budget: f32, window: &Win
 
 pub fn chip_width(label: &str, compact: bool, window: &Window) -> f32 {
     let (size, pad) = if compact { (8.8, 10.0) } else { (9.6, 14.0) };
-    text_width(
-        &label.to_uppercase(),
-        size,
-        FontWeight::EXTRA_BOLD,
-        0.4,
-        window,
-    ) + pad
+    let icons = label.chars().filter(|ch| ac_api::is_emoji(*ch)).count();
+    let text: String = label
+        .chars()
+        .filter(|ch| !ac_api::is_emoji(*ch))
+        .flat_map(char::to_uppercase)
+        .collect();
+    text_width(&text, size, FontWeight::EXTRA_BOLD, 0.4, window)
+        + icons as f32 * (crate::ui::chip_icon(compact) + 0.4)
+        + pad
 }

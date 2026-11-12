@@ -142,7 +142,6 @@ fn parse_violation(kind: PunishmentKind, body: &str) -> ApiResult<Option<Violati
             issued_by: string_field(violation, "whoBanned"),
             issued_by_name: String::new(),
             issued_by_display: Vec::new(),
-            remaining: int_field(violation, "banTime"),
             permanent: violation
                 .get("permanent")
                 .and_then(Value::as_bool)
@@ -208,7 +207,6 @@ mod tests {
         let out = parse_violation(PunishmentKind::Ban, body).unwrap().unwrap();
         assert_eq!(out.reason, "3.5");
         assert_eq!(out.issued_by, "uuid-b");
-        assert_eq!(out.remaining, 431987911);
         assert!(!out.permanent);
         assert_eq!(out.expires_at, 1794619178302);
         assert_eq!(out.price, 2000);

@@ -4,10 +4,10 @@ use std::time::{Duration, Instant};
 use ac_api::{Account, RAM_DEFAULT, RAM_MAX, RAM_MIN, RAM_STEP, TextureKind, TokenState, snap_ram};
 use futures::channel::oneshot;
 use gpui::{
-    AnyElement, AppContext, ClipboardItem, Context, ElementId, Entity, Focusable, FontWeight, Hsla,
-    InteractiveElement, IntoElement, MouseButton, ObjectFit, ParentElement, Render, RenderImage,
-    ScrollHandle, StatefulInteractiveElement, Styled, StyledImage, Task, Window, canvas, div, img,
-    prelude::FluentBuilder, px, relative,
+    AnyElement, App, AppContext, ClipboardItem, Context, ElementId, Entity, Focusable, FontWeight,
+    Hsla, InteractiveElement, IntoElement, MouseButton, ObjectFit, ParentElement, Render,
+    RenderImage, ScrollHandle, StatefulInteractiveElement, Styled, StyledImage, Task, Window,
+    canvas, div, img, prelude::FluentBuilder, px, relative,
 };
 
 use crate::assets::{Icon, icon};
@@ -28,6 +28,9 @@ const COPIED_FOR: Duration = Duration::from_millis(1200);
 const BODY_HEIGHT: f32 = 600.0;
 const BODY_MARGIN: f32 = 110.0;
 const VIOLATION_LABEL: f32 = 124.0;
+
+const RANK_ICON: f32 = 12.0;
+const ISSUER_ICON: f32 = 13.0;
 
 fn glow() -> Arc<RenderImage> {
     static GLOW: OnceLock<Arc<RenderImage>> = OnceLock::new();
@@ -447,7 +450,12 @@ impl AccountView {
                         .text_color(tone)
                         .text_size(rem(0.66))
                         .font_weight(FontWeight::BOLD)
-                        .child(rank.label)
+                        .child(crate::emoji::rich(
+                            &crate::emoji::label(&rank, cx),
+                            RANK_ICON,
+                            window,
+                            cx,
+                        ))
                 }))
         });
 
@@ -1142,6 +1150,8 @@ fn violation_card(
     kind: ac_api::PunishmentKind,
     violation: &ac_api::Violation,
     p: &Palette,
+    window: &Window,
+    cx: &mut App,
 ) -> gpui::Div {
     let (color, glyph) = match kind {
         ac_api::PunishmentKind::Ban => (p.red, Icon::Gavel),
@@ -1194,7 +1204,7 @@ fn violation_card(
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(p.text)
                                 .child(if label == crate::views::card::ISSUER {
-                                    issuer_text(violation, value, p)
+                                    issuer_text(violation, value, p, window, cx)
                                 } else {
                                     value.into_any_element()
                                 }),
@@ -1203,29 +1213,55 @@ fn violation_card(
         )
 }
 
-fn issuer_text(violation: &ac_api::Violation, fallback: String, p: &Palette) -> AnyElement {
+fn issuer_text(
+    violation: &ac_api::Violation,
+    fallback: String,
+    p: &Palette,
+    window: &Window,
+    cx: &mut App,
+) -> AnyElement {
     if violation.issued_by_display.is_empty() {
         return fallback.into_any_element();
     }
+    let mut row = div().flex().items_center().flex_wrap();
     let mut text = String::new();
     let mut highlights = Vec::with_capacity(violation.issued_by_display.len());
+    let flush = |row: gpui::Div, text: &mut String, highlights: &mut Vec<_>| {
+        if text.is_empty() {
+            return row;
+        }
+        row.child(
+            gpui::StyledText::new(std::mem::take(text)).with_highlights(std::mem::take(highlights)),
+        )
+    };
     for segment in &violation.issued_by_display {
-        let start = text.len();
-        text.push_str(&segment.text);
         let color = parse_hex(&segment.color)
             .filter(|_| !segment.color.eq_ignore_ascii_case("#ffffff"))
             .unwrap_or(p.text);
-        highlights.push((
-            start..text.len(),
-            gpui::HighlightStyle {
-                color: Some(color),
-                ..Default::default()
-            },
-        ));
+        let style = gpui::HighlightStyle {
+            color: Some(color),
+            ..Default::default()
+        };
+        let mut start = text.len();
+        for ch in segment.text.chars() {
+            if !ac_api::is_emoji(ch) {
+                text.push(ch);
+                continue;
+            }
+            let Some(icon) = crate::emoji::icon(ch, ISSUER_ICON, window, cx) else {
+                continue;
+            };
+            if text.len() > start {
+                highlights.push((start..text.len(), style));
+            }
+            row = flush(row, &mut text, &mut highlights).child(icon);
+            start = 0;
+        }
+        if text.len() > start {
+            highlights.push((start..text.len(), style));
+        }
     }
-    gpui::StyledText::new(text)
-        .with_highlights(highlights)
-        .into_any_element()
+    flush(row, &mut text, &mut highlights).into_any_element()
 }
 
 fn cabinet_block(
@@ -1287,73 +1323,72 @@ fn cabinet_block(
         )
         .when(cabinet.has_session, |header| header.child(refresh));
     let note = |text: String| div().text_size(rem(0.74)).text_color(p.muted).child(text);
-    let body: AnyElement = match cabinet.status.as_ref().filter(|_| cabinet.has_session) {
-        Some(status) if status.clean() => div()
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .child(icon(Icon::Check, px(15.0), p.green))
-            .child(
-                div()
-                    .text_size(rem(0.76))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(p.green)
-                    .child("Ни бана, ни мута"),
-            )
-            .into_any_element(),
-        Some(status) => div()
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .children(
-                status
-                    .ban
-                    .as_ref()
-                    .map(|ban| violation_card(ac_api::PunishmentKind::Ban, ban, p)),
-            )
-            .children(
-                status
-                    .mute
-                    .as_ref()
-                    .map(|mute| violation_card(ac_api::PunishmentKind::Mute, mute, p)),
-            )
-            .into_any_element(),
-        None if cabinet.loading => div()
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .child(Spinner::new("cabinet-spin", 14.0))
-            .child(note("Проверяю статус…".to_owned()))
-            .into_any_element(),
-        None => {
-            let uuid = uuid.to_owned();
-            let relogin = cabinet.error.is_some();
-            div()
+    let body: AnyElement =
+        match cabinet.status.as_ref().filter(|_| cabinet.has_session) {
+            Some(status) if status.clean() => div()
                 .flex()
-                .flex_col()
+                .items_center()
                 .gap(px(8.0))
-                .child(note(cabinet.error.clone().unwrap_or_else(|| {
-                    "Войдите в кабинет, чтобы видеть бан и мут".to_owned()
-                })))
+                .child(icon(Icon::Check, px(15.0), p.green))
                 .child(
-                    Button::new(
-                        "cabinet-login",
-                        if relogin {
-                            "Войти заново"
-                        } else {
-                            "Войти"
-                        },
-                        ButtonStyle::Tinted,
-                    )
-                    .height(32.0)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        sound::play(Sound::Tap);
-                        this.open_cabinet_login(uuid.clone(), cx);
-                    })),
+                    div()
+                        .text_size(rem(0.76))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(p.green)
+                        .child("Ни бана, ни мута"),
                 )
-                .into_any_element()
-        }
-    };
+                .into_any_element(),
+            Some(status) => {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .children(
+                        status.ban.as_ref().map(|ban| {
+                            violation_card(ac_api::PunishmentKind::Ban, ban, p, window, cx)
+                        }),
+                    )
+                    .children(status.mute.as_ref().map(|mute| {
+                        violation_card(ac_api::PunishmentKind::Mute, mute, p, window, cx)
+                    }))
+                    .into_any_element()
+            }
+            None if cabinet.loading => div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(Spinner::new("cabinet-spin", 14.0))
+                .child(note("Проверяю статус…".to_owned()))
+                .into_any_element(),
+            None => {
+                let uuid = uuid.to_owned();
+                let relogin = cabinet.error.is_some();
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(note(cabinet.error.clone().unwrap_or_else(|| {
+                        "Войдите в кабинет, чтобы видеть бан и мут".to_owned()
+                    })))
+                    .child(
+                        Button::new(
+                            "cabinet-login",
+                            if relogin {
+                                "Войти заново"
+                            } else {
+                                "Войти"
+                            },
+                            ButtonStyle::Tinted,
+                        )
+                        .height(32.0)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            sound::play(Sound::Tap);
+                            this.open_cabinet_login(uuid.clone(), cx);
+                        })),
+                    )
+                    .into_any_element()
+            }
+        };
     div()
         .mt(px(8.0))
         .flex()

@@ -4,6 +4,7 @@ mod ambient;
 mod assets;
 mod background;
 mod cabinet_login;
+mod emoji;
 mod format;
 #[cfg(feature = "mock")]
 mod mock;

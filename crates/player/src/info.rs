@@ -1,8 +1,4 @@
-use std::time::SystemTime;
-
 use serde::{Deserialize, Serialize};
-
-use crate::time::parse_rfc3339;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -38,14 +34,6 @@ pub struct PlayerInfo {
 }
 
 impl PlayerInfo {
-    pub fn last_seen_at(&self) -> Option<SystemTime> {
-        parse_rfc3339(&self.last_seen)
-    }
-
-    pub fn registered_at_time(&self) -> Option<SystemTime> {
-        parse_rfc3339(&self.registered_at)
-    }
-
     pub fn subscription_label(&self) -> String {
         match self.subscription.strip_prefix("level_") {
             Some(level) if !level.is_empty() && level.bytes().all(|b| b.is_ascii_digit()) => {
@@ -415,8 +403,6 @@ mod tests {
         assert_eq!(info.realm, "");
         assert_eq!(info.subscription, "level_2");
         assert_eq!((info.likes, info.views, info.score), (1, 20, 1));
-        assert!(info.last_seen_at().is_some());
-        assert!(info.registered_at_time().is_some());
     }
 
     #[test]

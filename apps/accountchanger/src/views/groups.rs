@@ -676,7 +676,7 @@ impl AddMembersView {
                                     .flex()
                                     .items_center()
                                     .gap(px(7.0))
-                                    .children(rank.map(|rank| Chip::new(rank.label, rank.color)))
+                                    .children(rank.map(Chip::rank))
                                     .child(
                                         div()
                                             .min_w_0()

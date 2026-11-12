@@ -80,9 +80,6 @@ while ([DateTime]::UtcNow -lt $deadline -and ($null -eq $btn)) {
   }
 }
 if ($null -eq $btn) { Write-Output "login: form NOT found (no Cristalix window with Вход button + 2 edits)"; exit 1 }
-$winpid = [uint32]0
-[void][Win]::GetWindowThreadProcessId($hwnd, [ref]$winpid)
-Write-Output ("login: winpid=" + $winpid)
 function Get-Value($el) {
   try { return $el.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value } catch { return '<n/a>' }
 }
@@ -234,12 +231,6 @@ pub struct ScriptOutcome {
     pub output: String,
 }
 
-impl ScriptOutcome {
-    pub fn window_pid(&self) -> u32 {
-        parse_winpid(&self.output)
-    }
-}
-
 async fn run(mut command: tokio::process::Command) -> ScriptOutcome {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     match command.output().await {
@@ -270,32 +261,4 @@ pub async fn uia_login(login: &str, password: &str, timeout: u32) -> ScriptOutco
 pub async fn uia_logout(timeout: u32) -> ScriptOutcome {
     let script = LOGOUT_SCRIPT.replacen("{{TIMEOUT}}", &timeout.to_string(), 1);
     run(powershell(&script)).await
-}
-
-fn parse_winpid(out: &str) -> u32 {
-    const MARKER: &str = "winpid=";
-    let Some(index) = out.find(MARKER) else {
-        return 0;
-    };
-    out[index + MARKER.len()..]
-        .bytes()
-        .take_while(u8::is_ascii_digit)
-        .fold(0u32, |acc, digit| {
-            acc.saturating_mul(10)
-                .saturating_add(u32::from(digit - b'0'))
-        })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn window_pid_is_read_from_script_output() {
-        assert_eq!(
-            parse_winpid("login: edit y=1\nlogin: winpid=4242\nlogin: typed"),
-            4242
-        );
-        assert_eq!(parse_winpid("login: form NOT found"), 0);
-    }
 }

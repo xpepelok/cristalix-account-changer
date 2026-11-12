@@ -36,14 +36,6 @@ impl Store {
         Ok(())
     }
 
-    pub async fn delete_player(&self, name: &str) -> Result<()> {
-        sqlx::query("DELETE FROM player_cache WHERE name = ?1")
-            .bind(name.to_lowercase())
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
     pub async fn prune_players(&self, older_than: i64) -> Result<()> {
         sqlx::query("DELETE FROM player_cache WHERE fetched_at < ?1")
             .bind(older_than)

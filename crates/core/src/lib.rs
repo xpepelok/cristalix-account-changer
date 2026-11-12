@@ -2,6 +2,7 @@ mod backend;
 mod cabinet;
 mod convert;
 mod core;
+mod emoji;
 mod events;
 mod ffmpeg;
 mod host;

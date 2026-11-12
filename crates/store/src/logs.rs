@@ -228,18 +228,6 @@ impl Store {
         Ok(())
     }
 
-    pub async fn log_size(&self, uuid: &str) -> Result<i64> {
-        let size: i64 = sqlx::query(
-            "SELECT COALESCE(SUM(LENGTH(l.text) + 1), 0) FROM log_lines l \
-             JOIN log_sessions s ON s.id = l.session_id WHERE s.uuid = ?1",
-        )
-        .bind(uuid)
-        .fetch_one(&self.pool)
-        .await?
-        .try_get(0)?;
-        Ok(size)
-    }
-
     pub async fn log_size_all(&self) -> Result<i64> {
         let size: i64 = sqlx::query("SELECT COALESCE(SUM(LENGTH(text) + 1), 0) FROM log_lines")
             .fetch_one(&self.pool)

@@ -797,6 +797,12 @@ impl Backend for Core {
         })
     }
 
+    fn emojis(&self, codes: Vec<u32>) -> ApiFuture<ac_api::EmojiSet> {
+        self.with(
+            move |inner| async move { crate::emoji::fetch(&inner.cabinet_http, &codes).await },
+        )
+    }
+
     fn cabinet_sessions(&self) -> ApiFuture<Vec<String>> {
         self.with(
             |inner| async move { Ok(inner.store.cabinet_sessions().await.unwrap_or_default()) },

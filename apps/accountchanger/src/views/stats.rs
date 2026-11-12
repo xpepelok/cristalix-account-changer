@@ -117,7 +117,7 @@ impl StatsView {
                             .gap(px(8.0))
                             .min_w_0()
                             .child(Avatar::new(&store, uuid, 26.0, 6.0))
-                            .children(rank.map(|rank| Chip::new(rank.label, rank.color).compact()))
+                            .children(rank.map(|rank| Chip::rank(rank).compact()))
                             .child(
                                 div()
                                     .flex_1()
